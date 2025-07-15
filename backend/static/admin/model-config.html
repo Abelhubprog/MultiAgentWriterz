@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HandyWriterz - Model Configuration Panel</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .main-content {
+            padding: 30px;
+        }
+
+        .section {
+            margin-bottom: 40px;
+        }
+
+        .section h2 {
+            color: #2d3748;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+
+        .config-summary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+        }
+
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .summary-item {
+            text-align: center;
+        }
+
+        .summary-item h3 {
+            font-size: 2rem;
+            margin-bottom: 5px;
+        }
+
+        .summary-item p {
+            opacity: 0.9;
+        }
+
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .btn-primary {
+            background: #4299e1;
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #3182ce;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5e0;
+        }
+
+        .btn-success {
+            background: #48bb78;
+            color: white;
+        }
+
+        .btn-warning {
+            background: #ed8936;
+            color: white;
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .agent-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
+            gap: 20px;
+        }
+
+        .agent-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s;
+        }
+
+        .agent-card:hover {
+            box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
+            transform: translateY(-2px);
+        }
+
+        .agent-header {
+            display: flex;
+            justify-content: between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .agent-title {
+            flex: 1;
+        }
+
+        .agent-title h3 {
+            color: #2d3748;
+            margin-bottom: 5px;
+        }
+
+        .agent-title p {
+            color: #718096;
+            font-size: 0.9rem;
+        }
+
+        .model-chip {
+            display: inline-block;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: white;
+            margin: 2px;
+        }
+
+        .model-chip.claude { background: #ff6b35; }
+        .model-chip.openai { background: #10a37f; }
+        .model-chip.google { background: #4285f4; }
+        .model-chip.grok { background: #1da1f2; }
+        .model-chip.qwen { background: #ff6600; }
+        .model-chip.deepseek { background: #8b5cf6; }
+        .model-chip.perplexity { background: #ff4081; }
+        .model-chip.default { background: #757575; }
+
+        .metrics {
+            background: #f7fafc;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 15px 0;
+        }
+
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 10px;
+            font-size: 0.85rem;
+        }
+
+        .metric-item {
+            text-align: center;
+        }
+
+        .metric-value {
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .metric-label {
+            color: #718096;
+            font-size: 0.75rem;
+        }
+
+        .fallback-models {
+            margin: 10px 0;
+        }
+
+        .fallback-models h4 {
+            font-size: 0.9rem;
+            color: #4a5568;
+            margin-bottom: 8px;
+        }
+
+        .edit-form {
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e2e8f0;
+        }
+
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #4a5568;
+        }
+
+        .form-group select,
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+
+        .form-group select:focus,
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #4299e1;
+            box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .alert-success {
+            background: #f0fff4;
+            border: 1px solid #68d391;
+            color: #276749;
+        }
+
+        .alert-error {
+            background: #fed7d7;
+            border: 1px solid #fc8181;
+            color: #c53030;
+        }
+
+        .alert-info {
+            background: #ebf8ff;
+            border: 1px solid #63b3ed;
+            color: #2c5282;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #718096;
+        }
+
+        .spinner {
+            border: 3px solid #e2e8f0;
+            border-top: 3px solid #4299e1;
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .swarm-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 25px;
+            margin-top: 30px;
+        }
+
+        .swarm-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .swarm-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            border: 1px solid #e2e8f0;
+        }
+
+        .swarm-agents {
+            margin-top: 15px;
+        }
+
+        .swarm-agent {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #f1f3f4;
+        }
+
+        .swarm-agent:last-child {
+            border-bottom: none;
+        }
+
+        .weight-bar {
+            width: 60px;
+            height: 6px;
+            background: #e2e8f0;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .weight-fill {
+            height: 100%;
+            background: #4299e1;
+            transition: width 0.3s;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                margin: 10px;
+                border-radius: 8px;
+            }
+
+            .header {
+                padding: 20px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .main-content {
+                padding: 20px;
+            }
+
+            .agent-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .controls {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1>🔧 Pluggable-Model Control Panel</h1>
+            <p>Dynamically configure AI models for HandyWriterz agents without redeploying</p>
+        </header>
+
+        <main class="main-content">
+            <!-- Loading State -->
+            <div id="loading" class="loading">
+                <div class="spinner"></div>
+                <p>Loading configuration data...</p>
+            </div>
+
+            <!-- Alerts -->
+            <div id="alerts"></div>
+
+            <!-- Config Summary -->
+            <div id="config-summary" class="config-summary hidden">
+                <h3>Configuration Status</h3>
+                <div class="summary-grid">
+                    <div class="summary-item">
+                        <h3 id="total-agents">0</h3>
+                        <p>Agents</p>
+                    </div>
+                    <div class="summary-item">
+                        <h3 id="total-providers">0</h3>
+                        <p>Providers</p>
+                    </div>
+                    <div class="summary-item">
+                        <h3 id="config-version">-</h3>
+                        <p>Version</p>
+                    </div>
+                    <div class="summary-item">
+                        <h3 id="last-updated">-</h3>
+                        <p>Last Updated</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls -->
+            <div id="controls" class="section hidden">
+                <div class="controls">
+                    <button class="btn btn-primary" onclick="reloadConfig()">
+                        🔄 Reload Configuration
+                    </button>
+                    <button class="btn btn-secondary" onclick="toggleBulkMode()">
+                        📝 Bulk Update Mode
+                    </button>
+                    <button class="btn btn-success hidden" id="apply-bulk" onclick="applyBulkUpdates()">
+                        ✅ Apply Bulk Updates
+                    </button>
+                    <button class="btn btn-secondary hidden" id="cancel-bulk" onclick="cancelBulkMode()">
+                        ❌ Cancel Bulk Mode
+                    </button>
+                </div>
+            </div>
+
+            <!-- Agent Configuration -->
+            <div id="agents-section" class="section hidden">
+                <h2>Agent Model Configuration</h2>
+                <div id="agent-grid" class="agent-grid"></div>
+            </div>
+
+            <!-- Swarm Intelligence Configuration -->
+            <div id="swarms-section" class="section hidden">
+                <h2>Swarm Intelligence Configuration</h2>
+                <div class="swarm-section">
+                    <p>Collective intelligence systems with multiple specialized agents working together</p>
+                    <div id="swarm-grid" class="swarm-grid"></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        // Global state
+        let agents = [];
+        let providers = {};
+        let metrics = {};
+        let swarms = {};
+        let configSummary = null;
+        let bulkMode = false;
+        let bulkUpdates = {};
+
+        // Initialize the application
+        async function init() {
+            try {
+                await loadAllData();
+                hideLoading();
+                showContent();
+            } catch (error) {
+                console.error('Initialization failed:', error);
+                showAlert('Failed to load configuration data: ' + error.message, 'error');
+                hideLoading();
+            }
+        }
+
+        // Load all configuration data
+        async function loadAllData() {
+            const token = localStorage.getItem('auth_token');
+            if (!token) {
+                throw new Error('Authentication token not found. Please log in.');
+            }
+
+            const headers = { 'Authorization': `Bearer ${token}` };
+
+            const [agentsRes, providersRes, metricsRes, swarmsRes, summaryRes] = await Promise.all([
+                fetch('/api/admin/models/agents', { headers }),
+                fetch('/api/admin/models/providers', { headers }),
+                fetch('/api/admin/models/metrics', { headers }),
+                fetch('/api/admin/models/swarms', { headers }),
+                fetch('/api/admin/models/config/summary', { headers })
+            ]);
+
+            if (!agentsRes.ok) throw new Error('Failed to load agents');
+            if (!providersRes.ok) throw new Error('Failed to load providers');
+            if (!metricsRes.ok) throw new Error('Failed to load metrics');
+            if (!swarmsRes.ok) throw new Error('Failed to load swarms');
+            if (!summaryRes.ok) throw new Error('Failed to load config summary');
+
+            const agentsData = await agentsRes.json();
+            const providersData = await providersRes.json();
+            const metricsData = await metricsRes.json();
+            const swarmsData = await swarmsRes.json();
+            const summaryData = await summaryRes.json();
+
+            agents = agentsData.data.agents;
+            providers = providersData.data.providers;
+            metrics = metricsData.data.metrics;
+            swarms = swarmsData.data.swarms;
+            configSummary = summaryData.data;
+
+            renderAll();
+        }
+
+        // Render all components
+        function renderAll() {
+            renderConfigSummary();
+            renderAgents();
+            renderSwarms();
+        }
+
+        // Render configuration summary
+        function renderConfigSummary() {
+            if (!configSummary) return;
+
+            document.getElementById('total-agents').textContent = configSummary.total_agents || 0;
+            document.getElementById('total-providers').textContent = configSummary.total_providers || 0;
+            document.getElementById('config-version').textContent = configSummary.version || '-';
+            
+            const lastUpdated = configSummary.last_updated 
+                ? new Date(configSummary.last_updated).toLocaleDateString()
+                : '-';
+            document.getElementById('last-updated').textContent = lastUpdated;
+
+            document.getElementById('config-summary').classList.remove('hidden');
+        }
+
+        // Render agents
+        function renderAgents() {
+            const grid = document.getElementById('agent-grid');
+            grid.innerHTML = '';
+
+            agents.forEach(agent => {
+                const card = createAgentCard(agent);
+                grid.appendChild(card);
+            });
+
+            document.getElementById('agents-section').classList.remove('hidden');
+        }
+
+        // Create agent card
+        function createAgentCard(agent) {
+            const agentMetrics = metrics[agent.name] || {};
+            const modelClass = getModelClass(agent.current_model);
+
+            const card = document.createElement('div');
+            card.className = 'agent-card';
+            card.innerHTML = `
+                <div class="agent-header">
+                    <div class="agent-title">
+                        <h3>${agent.display_name}</h3>
+                        <p>${agent.description}</p>
+                    </div>
+                </div>
+
+                <div>
+                    <strong>Current Model:</strong>
+                    <span class="model-chip ${modelClass}">${agent.current_model}</span>
+                </div>
+
+                ${agent.fallback_models.length > 0 ? `
+                <div class="fallback-models">
+                    <h4>Fallback Models:</h4>
+                    ${agent.fallback_models.slice(0, 3).map(model => 
+                        `<span class="model-chip ${getModelClass(model)}">${model}</span>`
+                    ).join('')}
+                    ${agent.fallback_models.length > 3 ? 
+                        `<span class="model-chip default">+${agent.fallback_models.length - 3} more</span>` 
+                        : ''
+                    }
+                </div>
+                ` : ''}
+
+                ${Object.keys(agentMetrics).length > 0 ? `
+                <div class="metrics">
+                    <div class="metrics-grid">
+                        <div class="metric-item">
+                            <div class="metric-value">${agentMetrics.total_requests || 0}</div>
+                            <div class="metric-label">Requests</div>
+                        </div>
+                        <div class="metric-item">
+                            <div class="metric-value">${(agentMetrics.avg_response_time || 0).toFixed(2)}s</div>
+                            <div class="metric-label">Avg Time</div>
+                        </div>
+                        <div class="metric-item">
+                            <div class="metric-value">$${(agentMetrics.total_cost || 0).toFixed(4)}</div>
+                            <div class="metric-label">Cost</div>
+                        </div>
+                        <div class="metric-item">
+                            <div class="metric-value">${agentMetrics.error_count || 0}</div>
+                            <div class="metric-label">Errors</div>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+
+                <div class="edit-form ${bulkMode ? '' : 'hidden'}" id="bulk-${agent.name}">
+                    <div class="form-group">
+                        <label>New Model:</label>
+                        <select onchange="updateBulkSelection('${agent.name}', this.value)">
+                            <option value="">Keep current model</option>
+                            ${Object.entries(providers).map(([provider, models]) => 
+                                models.map(model => 
+                                    `<option value="${model}" ${model === agent.current_model ? 'selected' : ''}>${model} (${provider})</option>`
+                                ).join('')
+                            ).join('')}
+                        </select>
+                    </div>
+                </div>
+
+                <div class="edit-form ${bulkMode ? 'hidden' : ''}" id="single-${agent.name}">
+                    <button class="btn btn-primary" onclick="editAgent('${agent.name}')">
+                        ✏️ Edit Model
+                    </button>
+                </div>
+            `;
+
+            return card;
+        }
+
+        // Render swarms
+        function renderSwarms() {
+            const grid = document.getElementById('swarm-grid');
+            grid.innerHTML = '';
+
+            Object.entries(swarms).forEach(([swarmName, swarmConfig]) => {
+                const card = createSwarmCard(swarmName, swarmConfig);
+                grid.appendChild(card);
+            });
+
+            document.getElementById('swarms-section').classList.remove('hidden');
+        }
+
+        // Create swarm card
+        function createSwarmCard(swarmName, swarmConfig) {
+            const card = document.createElement('div');
+            card.className = 'swarm-card';
+            card.innerHTML = `
+                <h3>${swarmConfig.name}</h3>
+                <p>${swarmConfig.description}</p>
+                
+                <div class="swarm-agents">
+                    ${Object.entries(swarmConfig.agents).map(([role, config]) => `
+                        <div class="swarm-agent">
+                            <div>
+                                <strong>${role.replace(/_/g, ' ')}</strong><br>
+                                <span class="model-chip ${getModelClass(config.model)}">${config.model}</span>
+                            </div>
+                            <div>
+                                <div style="text-align: right; font-size: 0.8rem; margin-bottom: 3px;">
+                                    ${(config.weight * 100).toFixed(0)}%
+                                </div>
+                                <div class="weight-bar">
+                                    <div class="weight-fill" style="width: ${config.weight * 100}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #e2e8f0; font-size: 0.9rem;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span>Consensus: ${(swarmConfig.consensus_threshold * 100).toFixed(0)}%</span>
+                        <span>Diversity: ${(swarmConfig.diversity_target * 100).toFixed(0)}%</span>
+                    </div>
+                </div>
+            `;
+
+            return card;
+        }
+
+        // Get model class for styling
+        function getModelClass(model) {
+            if (model.includes('claude')) return 'claude';
+            if (model.includes('gpt') || model.includes('o1') || model.includes('o3')) return 'openai';
+            if (model.includes('gemini')) return 'google';
+            if (model.includes('grok')) return 'grok';
+            if (model.includes('qwen')) return 'qwen';
+            if (model.includes('deepseek')) return 'deepseek';
+            if (model.includes('sonar') || model.includes('llama')) return 'perplexity';
+            return 'default';
+        }
+
+        // Bulk mode functions
+        function toggleBulkMode() {
+            bulkMode = !bulkMode;
+            bulkUpdates = {};
+
+            // Toggle visibility
+            document.querySelectorAll('[id^="bulk-"]').forEach(el => {
+                el.classList.toggle('hidden', !bulkMode);
+            });
+            document.querySelectorAll('[id^="single-"]').forEach(el => {
+                el.classList.toggle('hidden', bulkMode);
+            });
+
+            // Toggle buttons
+            document.getElementById('apply-bulk').classList.toggle('hidden', !bulkMode);
+            document.getElementById('cancel-bulk').classList.toggle('hidden', !bulkMode);
+        }
+
+        function cancelBulkMode() {
+            toggleBulkMode();
+        }
+
+        function updateBulkSelection(agentName, newModel) {
+            if (newModel && newModel !== '') {
+                bulkUpdates[agentName] = newModel;
+            } else {
+                delete bulkUpdates[agentName];
+            }
+        }
+
+        async function applyBulkUpdates() {
+            const updates = Object.entries(bulkUpdates).map(([agent_name, new_model]) => ({
+                agent_name,
+                new_model
+            }));
+
+            if (updates.length === 0) {
+                showAlert('No updates selected', 'error');
+                return;
+            }
+
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/admin/models/agents/bulk-update', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        updates,
+                        reason: 'Bulk update via admin panel'
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Bulk update failed');
+                }
+
+                const data = await response.json();
+                showAlert(`Bulk update completed: ${data.data.successful_count} successful, ${data.data.error_count} errors`, 'success');
+                
+                cancelBulkMode();
+                await loadAllData();
+
+            } catch (error) {
+                console.error('Bulk update failed:', error);
+                showAlert('Bulk update failed: ' + error.message, 'error');
+            }
+        }
+
+        // Single agent edit
+        function editAgent(agentName) {
+            const agent = agents.find(a => a.name === agentName);
+            if (!agent) return;
+
+            const newModel = prompt(`Select new model for ${agent.display_name}:\n\nCurrent: ${agent.current_model}\n\nAvailable models:\n${Object.values(providers).flat().join('\n')}`, agent.current_model);
+            
+            if (newModel && newModel !== agent.current_model) {
+                updateAgentModel(agentName, newModel);
+            }
+        }
+
+        async function updateAgentModel(agentName, newModel) {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch(`/api/admin/models/agents/${agentName}/model`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({
+                        agent_name: agentName,
+                        new_model: newModel,
+                        reason: 'Single update via admin panel'
+                    })
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || 'Update failed');
+                }
+
+                const data = await response.json();
+                showAlert(`Successfully updated ${agentName} to use ${newModel}`, 'success');
+                await loadAllData();
+
+            } catch (error) {
+                console.error('Update failed:', error);
+                showAlert('Update failed: ' + error.message, 'error');
+            }
+        }
+
+        // Reload configuration
+        async function reloadConfig() {
+            try {
+                const token = localStorage.getItem('auth_token');
+                const response = await fetch('/api/admin/models/reload', {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+
+                if (!response.ok) throw new Error('Failed to reload configuration');
+
+                const data = await response.json();
+                showAlert(data.message, 'success');
+                await loadAllData();
+
+            } catch (error) {
+                console.error('Reload failed:', error);
+                showAlert('Reload failed: ' + error.message, 'error');
+            }
+        }
+
+        // UI utility functions
+        function showAlert(message, type) {
+            const alertsContainer = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+
+            alertsContainer.appendChild(alert);
+
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                if (alert.parentNode) {
+                    alert.parentNode.removeChild(alert);
+                }
+            }, 5000);
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').classList.add('hidden');
+        }
+
+        function showContent() {
+            document.getElementById('controls').classList.remove('hidden');
+        }
+
+        // Initialize when page loads
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

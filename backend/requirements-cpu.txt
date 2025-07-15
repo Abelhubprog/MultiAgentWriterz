@@ -1,0 +1,98 @@
+# HandyWriterz Backend Dependencies - CPU Only (Fast Build)
+
+# Core Framework
+fastapi>=0.104.1,<0.106.0
+uvicorn[standard]>=0.24.0,<0.26.0
+pydantic>=2.5.0,<3.0.0
+pydantic-settings>=2.1.0,<3.0.0
+
+# Database
+sqlalchemy>=2.0.23,<3.0.0
+alembic>=1.13.0,<2.0.0
+asyncpg>=0.29.0,<1.0.0
+
+# Redis
+redis>=5.0.1,<6.0.0
+aioredis>=2.0.1,<3.0.0
+
+# AI/ML Libraries (Latest compatible versions)
+openai>=1.86.0,<2.0.0
+anthropic>=0.8.0,<1.0.0
+google-generativeai>=0.3.0,<1.0.0
+
+# Basic vector storage (without heavy dependencies)
+pgvector>=0.2.3,<1.0.0
+
+# File Processing
+PyPDF2>=3.0.1,<4.0.0
+python-docx>=1.1.0,<2.0.0
+python-multipart>=0.0.6,<1.0.0
+
+# Cloud Storage
+boto3>=1.34.0,<2.0.0
+botocore>=1.34.0,<2.0.0
+
+# Authentication & Security
+python-jose[cryptography]>=3.3.0,<4.0.0
+passlib[bcrypt]>=1.7.4,<2.0.0
+cryptography>=36.0.0,<44.1
+
+# HTTP Client
+aiohttp>=3.9.1,<4.0.0
+requests>=2.31.0,<3.0.0
+
+# Utilities
+python-dotenv>=1.0.0,<2.0.0
+pyyaml>=6.0.1,<7.0.0
+jsonschema>=4.20.0,<5.0.0
+email-validator>=2.1.0,<3.0.0
+
+# Monitoring & Logging
+structlog>=23.2.0,<24.0.0
+sentry-sdk[fastapi]>=1.39.0,<2.0.0
+
+# Background Tasks
+celery>=5.3.4,<6.0.0
+kombu>=5.3.4,<6.0.0
+
+# Development Tools
+pytest>=7.4.3,<8.0.0
+pytest-asyncio>=0.21.1,<1.0.0
+pytest-cov>=4.1.0,<5.0.0
+black>=23.11.0,<24.0.0
+isort>=5.12.0,<6.0.0
+flake8>=6.1.0,<7.0.0
+mypy>=1.7.0,<2.0.0
+
+# Date/Time
+python-dateutil>=2.8.2,<3.0.0
+pytz>=2023.3,<2024.0
+
+# Configuration
+dynaconf>=3.2.4,<4.0.0
+supabase>=2.16.0,<3.0.0
+
+# LangChain extras
+langchain-openai>=0.3.27,<0.4.0
+langchain-anthropic>=0.3.17,<0.4.0
+langchain-deepseek>=0.1.3,<0.2.0
+
+# GitHub integration
+PyGithub>=2.6.1,<3.0.0
+
+# Text processing (basic, no ML models)
+nltk>=3.8.1,<4.0.0
+textstat>=0.7.3,<1.0.0
+
+# Web scraping
+beautifulsoup4>=4.12.2,<5.0.0
+
+# Math & Scientific (CPU only versions)
+numpy>=1.25.2,<2.0.0
+pandas>=2.1.4,<3.0.0
+
+# Async Support
+aiofiles>=23.2.1,<24.0.0
+
+# Basic Telegram support
+python-telegram-bot>=21.0.0,<22.0.0

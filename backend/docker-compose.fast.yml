@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.fast
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    environment:
+      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=postgresql://handywriterz:handywriterz_dev_2024@db:5432/handywriterz
+    depends_on:
+      - redis
+      - db
+    restart: unless-stopped
+    
+  redis:
+    image: "redis:7-alpine"
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=handywriterz
+      - POSTGRES_USER=handywriterz
+      - POSTGRES_PASSWORD=handywriterz_dev_2024
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
