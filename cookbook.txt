@@ -1,0 +1,891 @@
+
+Every line shows exactly **what component runs, what payload crosses the wire, where state mutations happen, how tokens are budgeted, how costs accrue, and which failure guards fire.**
+The narrative is formatted as a *time‑ordered log* so you can literally follow packets from **T +00 ms** to **T +9 min 42 s** when the download link appears.
+
+**Legend**
+
+```
+[FE]         code in frontend/apps/web (Next.js)
+[WS]         Browser ↔ WebSocket /ws/{trace_id}
+[API]        HTTPS request
+[TASK]       Celery worker job
+[NODE]       Agent node (handywriterz/nodes/*)
+[SVC]        Backend service helper (handywriterz/services/*)
+[DB]         Postgres / pgvector
+[CACHE]      Redis
+↻            Retries / loops
+$token(x)    token count of x
+$usd(x)      cost accumulator
+```
+
+> **NOTE** – 1120 lines follow (≈ 10 k words).
+> Indentation = call stack depth.
+> Each timestamp is **relative** to Send click.
+
+```
+──────────────────────────────────────────────────────────────────────────────
+T +00 ms  USER ACTION
+──────────────────────────────────────────────────────────────────────────────
+[FE]  User clicks  ⬆  in /app/chat  (PromptEditor, mode="Dissertation")
+      Prompt chars ..................... 12 476   ≈ $token(1440)
+      Files queued  .................... 19 (2 087 MB total)
+      Local state → sendPayload in React Query mutation
+
+──────────────────────────────────────────────────────────────────────────────
+T +03 ms  FILE UPLOAD PREP  (parallel)
+──────────────────────────────────────────────────────────────────────────────
+[FE]  ContextUploadMenu creates 19 tus resumable uploads
+[FE]  Generates local uploadId[]; for each file:
+       — POST /api/files/presign  (name, size, mime)
+[API]  /api/files/presign
+       ▸ Validates size≤100 MB, count≤50 per prompt  ← **Excel 459 MB fails** (split)
+       ▸ Returns S3 presigned multipart URL   (19 × 3 parts for big PDFs)
+[FE]  tus‑js begins PUT streams, throttle 2 × 100 MB concurrent.
+
+──────────────────────────────────────────────────────────────────────────────
+T +2 100 ms  FILE UPLOAD FINISHED
+──────────────────────────────────────────────────────────────────────────────
+[FE]  All PUT/Complete requests 201; progress bars to 100 %
+       Server returns {file_id:"f_..."} for each → filesByTraceId cache
+[FE]  Now POST /api/chat
+       body={
+         prompt, mode:"Dissertation",
+         file_ids:["f_pdf1"…"f_mp3"],
+         user_params:{citationStyle:"Harvard", wordCount:4500}
+       }
+
+──────────────────────────────────────────────────────────────────────────────
+T +2 120 ms  FASTAPI ENTRY
+──────────────────────────────────────────────────────────────────────────────
+[API]  middleware/security_middleware → validates JWT  ✅
+[API]  middleware/tiered_routing      → plan="PRO", quota remaining ✅
+[API]  /api/chat handler
+       ▸ creates trace_id="trc_A1C9"
+       ▸ inserts Conversation & Message rows  [DB]
+       ▸ system_router.route()
+
+  system_router.route()
+  ├─ complexity_analyzer.score() ........... 0.86  (long, research heavy)
+  └─ selects graph/dissertation.yaml
+
+  plan_builder.build(graph/dissertation.yaml)
+  ├─ parses YAML steps
+  ├─ instantiates 27 Node objects
+  └─ registers  asyncio.Queue  trace_queues[trace_id]
+
+[API]  returns 202
+       JSON {trace_id:"trc_A1C9"}
+
+──────────────────────────────────────────────────────────────────────────────
+T +2 150 ms  WS OPEN
+──────────────────────────────────────────────────────────────────────────────
+[FE]  useStream("trc_A1C9") → new WebSocket
+[WS]  CONNECT  /ws/trc_A1C9   (accepted)
+
+──────────────────────────────────────────────────────────────────────────────
+T +2 160 ms  ASYNC NODERUNNER SPINS UP
+──────────────────────────────────────────────────────────────────────────────
+[NODERUNNER]  begins execution with bounded semaphore(5)
+
+──────────────── Stage 1  INTENT ────────────────
+
+  [WS] ▶ {"type":"node_started","name":"enhanced_user_intent"}
+
+  [NODE] enhanced_user_intent.py
+         ▸ Ask model (gpt-4o-mini) for clarifications?
+         ▸ No clarifications needed.
+         ▸ Detects domain:"clinical research", genre:"dissertation"
+         ▸ Emits suggestions → HWState.user_params.extend()
+
+  [CACHE] Redis hit? prompt+model hash ✗
+  [SVC]   llm_service.llm_call(model="gpt4o-mini", $token(300))
+  [CACHE] Redis store result
+  [DB]    cost += $usd( (300+120) × $0.0005 )
+
+  [WS] ◀ {"type":"node_finished","name":"enhanced_user_intent","tokens":420}
+
+  … identical logs for intelligent_intent_analyzer and user_intent (fallback skipped)
+
+──────────────── Stage 2  FILE EMBEDDING (already in parallel) ───────────────
+
+[TASK] chunk_queue_worker.process_doc(f_pdf1)
+       ▸ pdfplumber →  423 pages
+       ▸ chunk_splitter(max_char=1400, 50 % overlap)  → 828 chunks
+       ▸ embedding_service.embed(text)  batched 64 / call
+             model=text-embedding-3-small
+             total $token(57 k) → $usd(0.02)
+       ▸ vector_storage.upsert(doc_id, chunk_id, embedding, metadata)
+       ▸ Postgres commit
+[WS]  derivative event  {"type":"embedding_done","file":"f_pdf1","chunks":828}
+… repeats for 19 files (total 9 432 chunks) in 6 Celery workers.
+
+──────────────── Stage 3  PLANNING ────────────────
+
+  [NODE] planner.py
+         ▸ Scans HWState.user_params + genre
+         ▸ Sets outline (Ch 1 Intro … Ch 8 Recommendations)
+         ▸ Stores in HWState.plan
+  [WS] finished event
+
+  [NODE] methodology_writer.py
+         ▸ Builds Methods chapter scaffold (study design, ethics, stats)
+  [WS] finished
+
+  [NODE] loader.py
+         ▸ Recognises Excel file; queues special TASK → parse numeric data
+[TASK] parse_tabular_worker
+       ▸ pandas.read_excel → JSON summary, pushes to DB, emits WS
+
+──────────────── Stage 4  RESEARCH SWARM ────────────────
+
+   Parallel limit = 5
+
+   ┌──────── search_claude.py  (Claude Sonnet) ─────────┐
+   │ prompt uses 3 best query variants                 │
+   │ result  → 12 URLs + snippets                      │
+   └──────── cost $usd(0.06)                           ┘
+   similar blocks: search_gemini, search_crossref, search_perplexity
+
+   [NODE] research_swarm/trend_analysis.py  (DeepSeek)
+   [NODE] research_swarm/arxiv_specialist.py (GPT‑4o)
+   …
+
+   When any search node finishes:
+   [WS] {"type":"search_result", "agent":"search_claude", "count":12}
+
+   [NODE] source_filter.py
+          ▸ drops paywalled / blog sources, keeps 54 / 87
+   [NODE] source_verifier.py
+          ▸ fact‑check top 20 with GPT‑4o‑mini, flags 2 retracted
+   [NODE] prisma_filter.py (user ticked “Systematic review”): retains 32
+   [NODE] privacy_manager.py -> scrubs PII
+
+──────────────── Stage 5  RAG & MEMORY ────────────────
+
+  [NODE] aggregator.py  merges all verified URLs → table
+  [NODE] rag_summarizer.py
+         ▸ embed current prompt → q_vec
+         ▸ SELECT * FROM embeddings
+             ORDER BY cos_sim(q_vec, vector) DESC
+             LIMIT 8
+         ▸ Pushes 8 chunks to HWState.rag_chunks
+
+  [NODE] memory_retriever.py
+         ▸ find last 10 conversations with topic similarity >0.5
+         ▸ returns personal style vectors, adds to context
+  [NODE] memory_writer.py  queues embeddings of final draft (finished later)
+
+──────────────── Stage 6  WRITING ────────────────
+  [NODE] writer.py  (Gemini 2.5 Pro)
+         prompt length:  1 440 (user) + 8×500 + 1 000 (research) ≈  5 440 tokens
+         temperature=0.6, top_p=0.95
+         Streaming begin…
+
+   loop  every 200 chars  ➔ trace_queue.put({"type":"stream","text":...})
+   [WS] Browser renders incremental paragraphs.
+
+   Total output 4 700 tokens → $usd(0.94)
+
+   Writing helpers run sequentially (cheap)
+   * academic_tone (GPT‑4o‑mini) $usd(0.03)
+   * clarity_enhancer            $usd(0.02)
+   * structure_optimizer         $usd(0.02)
+   * citation_master             $usd(0.04)
+
+──────────────── Stage 7  FORMAT & QA ────────────────
+
+  [NODE] formatter_advanced.py
+         ▸ markdown‑to‑docx using python‑docx template
+         ▸ inserts stylised heading, page numbers, ToC
+         ▸ saves /data/out/trc_A1C9.docx  (1.2 MB)
+         ▸ emits WS {"type":"format_done","url":"/api/doc/trc_A1C9"}
+
+  [NODE] citation_audit.py
+         ▸ regex verify (Smith 2020) in bibliography – missing 2 entries
+         ▸ Adds to HWState.citation_fixes
+
+  QA micro‑swarm (parallel):
+     qa_swarm.bias_detection (gpt4o-mini)  ✔︎
+     qa_swarm.fact_checking   (gpt4o-mini)  flags 1 unsupported claim
+     qa_swarm.ethical_reason  (gpt4o-mini)  ✔︎
+     qa_swarm.originality_guard passes responsibility to Turnitin
+
+  evaluator.py  (simple rubric score 0–100)
+  evaluator_advanced.py (consensus GPT‑4o + Claude Opus + Gemini 1.5)
+      returns overall 92/100
+
+──────────────── Stage 8  META COORDINATION ────────────────
+
+  swarm_intelligence_coordinator.py
+      • sees evaluator >85 and minor fact issue
+      • calls writer.rewrite_o3 on paragraph 23
+      • triggers 1 fast rewrite (GPT‑4o‑mini, cost $0.01)
+
+  emergent_intelligence_engine.py
+      • builds concept map, suggests a novel angle (neuro‑obs diary)
+      • attaches to appendix
+
+  fail_handler_advanced.py – no fatal errors, skipped
+  source_fallback_controller.py – 32 sources still valid
+  synthesis.py – merges final fixes into HWState.final_draft
+
+──────────────── Stage 9  DERIVATIVES & COMPLIANCE ────────────────
+
+[TASK] turnitin_advanced Celery worker
+      • uploads DOCX, polls every 30 s
+      • similarity 13 %  (threshold 15)  
+      • publishes WS {"type":"plagiarism_score","score":13}
+
+[TASK] slide_generator
+      • GPT‑4o mini →  10‑slide outline
+      • python‑pptx builds branded template pptx
+      • uploads to Supabase, returns presigned URL
+      • WS {"type":"derivative_ready","kind":"slides","url":"https://...pptx"}
+
+[TASK] derivatives.py (charts)
+      • uses pandas + matplotlib to plot ICU infection rates from Excel
+      • embeds chart images into a separate PPT section
+
+[TASK] arweave (optional)
+      • SHA256(docx) → Arweave txn 0xABC…  
+      • store txn id in DB
+
+──────────────── Stage 10  COMPLETION ────────────────
+
+[NODERUNNER] all sync nodes done, Celery tasks scheduled
+[WS] {"type":"workflow_finished","quality":0.91,"cost_usd":2.37}
+
+Frontend reactions
+──────────────────
+[FE] AgentTimeline turns overall green with cost badge “$2.37”
+[FE] DownloadMenu shows:
+      • Dissertation.docx  (link)  
+      • Slides.pptx        (link)  
+      • Originality 13 %   (green)
+
+User clicks Word
+────────────────
+[FE]  GET /api/doc/trc_A1C9  (Auth header)
+[API] Generates Supabase signed URL (60 min) and redirects 302.
+Browser downloads 1.2 MB DOCX.
+
+──────────────────────────────────────────────────────────────────────────────
+END OF JOB   (T +9 min 42 s)
+──────────────────────────────────────────────────────────────────────────────
+Daily ledger update
+[CACHE] Redis token_tracker flushed → db.AgentCost(cost=2.37, tokens=9 811)
+
+Monitoring / metrics
+[SVC]  core/metrics.py Prometheus counters increment:
+      node_calls_total{node="writer",model="gemini-2.5-pro"} += 1
+      usd_cost_total += 2.37
+      workflow_latency_seconds{mode="dissertation"} = 582
+
+Admin override example
+──────────────────────
+POST /admin/models/writer {"model_id":"claude-3-opus"}
+Redis set model_override:writer=claude-3-opus
+Next user job picks new model with no server restart.
+
+```
+
+---
+
+## Component inventory referenced above
+
+| Component                | Source file                                   | Critical notes                                               |
+| ------------------------ | --------------------------------------------- | ------------------------------------------------------------ |
+| **PromptEditor**         | `packages/ui/chat/PromptEditor.tsx`           | Elastic resize ≤ 50 vh; `onKeyDown Enter` checks `!shiftKey` |
+| **ContextUploadMenu**    | `packages/ui/chat/ContextUploadMenu.tsx`      | Dropdown with tus resumable; enforces 50‑file cap            |
+| **FileUploadZone**       | same folder                                   | Drag‑n‑drop, previews, chunk progress                        |
+| **useStream**            | `packages/ui/hooks/useStream.ts`              | Merges WS events to Zustand `timelineAtom`                   |
+| **AgentTimeline**        | `packages/ui/chat/AgentTimeline.tsx`          | Renders each Node card, live badge, error accordions         |
+| **DownloadMenu**         | `packages/ui/chat/DownloadMenu.tsx`           | Pops when `derivative_ready` or `format_done` event          |
+| **OriginalityWorkbench** | `apps/web/app/originality/[traceId]/page.tsx` | Highlights plagiarised spans, lets user request rewrite      |
+
+---
+
+## Technology glue
+
+| Layer             | Tech                                                                           |
+| ----------------- | ------------------------------------------------------------------------------ |
+| Front‑end bundler | **Next.js 14 App Router** (prod), Vite playground (dev experiments)            |
+| State management  | Zustand for timeline & file uploads; React Query for HTTP mutations            |
+| Auth              | Dynamic.xyz embedded wallet → JWT; fallback email‑magiclink                    |
+| File transport    | **tus‑js‑client** (browser) + FastAPI tus‑server or S3 multipart presign       |
+| Storage           | Supabase buckets (`uploads/`, `outputs/`) + `/data/uploads` in dev             |
+| Vector store      | Supabase pgvector (`embedding` table)                                          |
+| LLMs              | Gemini 2.5 Pro (writer) • Claude‑3 Sonnet (search) • GPT‑4o mini (helpers, QA) |
+| Embeddings        | `text-embedding-3-small` (OpenAI)                                              |
+| Costs             | Static JSON price map in `services/model_service.py`                           |
+| Async jobs        | Celery (Redis broker), concurrency 8                                           |
+| Streaming         | WebSocket via Uvicorn (HTTP)                                                   |
+| Formatting        | `python‑docx`, `markdown2`                                                     |
+| Turnitin          | Official V3 REST polling                                                       |
+| Arweave           | `arweave-python-client`                                                        |
+| Monitoring        | Prometheus + Grafana; OTLP traces via OpenTelemetry                            |
+
+---
+
+### How to extend
+
+* **Bigger files** – raise chunk size to 2 000 chars, still fit 8 × chunks for 2 M‑token Gemini.
+* **Live co‑editing** – broadcast `"edit"` events over WS; sync cursor positions.
+* **Group projects** – prefix `trace_id` with `circleId`, share file buckets.
+* **Mobile** – use Expo Router; call `/ws` over WSS; reuse same JSON events.
+
+---
+
+With this timeline‑style trace you can **replay** every system hop, pinpoint costs, audit token flow, and know exactly which micro‑service to patch if anything fails.
+No step is hidden; no “magic happens here.” This is the full‑stack choreography that turns a multimodal dissertation request into a polished Word document ready for download.
+
+Below is a **clean‑room blueprint**—starting strictly from *first‑principles*—for three fully‑isolated areas of your product:
+
+1. **Billing / Payment Center** (credit‑card + crypto)
+2. **User Profile** (public avatar, academic footprint)
+3. **Settings Dashboard** (model limits, notification prefs, security)
+
+They live **outside** the chat workspace and do **not** pollute the chat UI bundle.
+Everything is mapped to *Next 14 App Router*, *Turborepo* conventions, Shadcn UI, Tailwind 4, Zustand, and React‑Query.
+
+---
+
+## 1 Information architecture (routes)
+
+```
+/app
+  ├─ chat/                     ← current workspace
+  ├─ profile/                  ← public profile preview
+  ├─ settings/                 ← personal settings
+  │    ├─ general              (name, theme, locale)
+  │    ├─ billing              **Payment UI lives here**
+  │    ├─ usage                (cost graphs)
+  │    └─ security             (keys, 2‑FA)
+  └─ admin/…                   (if role=admin)
+```
+
+*All pages use the same shell (`app/(dashboard)/layout.tsx`) which injects sidebar + top bar; chat lives in `(workspace)` segment. Payment & settings pages compile **only when navigated to** thanks to Next JS code‑splitting.*
+
+---
+
+## 2 Design primitives
+
+| Concern              | First‑principle decision                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| **Visual hierarchy** | Side‑rail navigation left (desktop), collapses to bottom navbar on mobile.                         |
+| **State scope**      | Page‑local React‑Query caches; global Zustand slice only for `user` & `plan`.                      |
+| **Security first**   | Every “write” API request must include `X-CSRF` header issued by `/api/csrf-token`.                |
+| **Accessibility**    | Shadcn components already WCAG 2.1 AA; add `aria-labelledby`, proper focus traps in dialogs.       |
+| **Responsiveness**   | 12‑column CSS grid (`grid-cols-[sidebar_1fr]`); fallback single column on `<768 px`.               |
+| **Pluggability**     | Payments abstracted via `walletProvider.ts` hook (returns `pay()`, `linkBank()`, `listMethods()`). |
+
+---
+
+## 3 Payment UI (Settings ▸ Billing)
+
+### 3.1 Component tree
+
+```
+BillingPanel.tsx
+├─ PaymentSummaryCard             (current plan, next invoice, usage bar)
+├─ PaymentMethodsSection
+│    ├─ StoredMethodCard[]        (Visa …, USDC wallet)
+│    └─ AddMethodButton + Dialog  (tabs: Card / Crypto)
+├─ InvoicesTable                  (past PDF invoices)
+└─ DangerZone                      (cancel, delete data)
+```
+
+### 3.2 Data flow
+
+```
+BillingPanel.mount()
+  ↳ ReactQuery GET /api/billing/summary
+  ↳ ReactQuery GET /api/billing/methods
+  ↳ ReactQuery GET /api/billing/invoices
+```
+
+*Mutation pattern* (`useMutation`):
+
+* **Add card** → POST Stripe SetupIntent token to `/api/billing/methods`
+* **Add crypto wallet** → POST Coinbase Commerce charge object, wait webhook
+* **Upgrade plan** → POST `/api/billing/subscribe` body `{plan_id}`
+* Update queries with `queryClient.invalidateQueries(['billing'])`
+
+### 3.3 Shadcn dialogs
+
+* `AddMethodDialog` = Radix Dialog + Card tabs; integrates **Stripe Elements** or **dynamic.xyz `ConnectButton`**.
+* Confirmation dialogues have red accent (`destructive` variant).
+
+### 3.4 Cost bar
+
+```tsx
+<Progress value={(usageUsd / planLimitUsd) * 100} className="h-2 bg-slate-700" />
+```
+
+Data from `/api/billing/usage?period=this_month`.
+
+---
+
+## 4 User Profile page (`/app/profile`)
+
+### 4.1 Sections
+
+1. **Header** – avatar (`next/image`), display‑name, degree badges.
+2. **Academic Footprint** – ORCID id, Google Scholar link, ResearchGate.
+3. **Writing Stats** – total words, citations, originality avg (spark‑line).
+4. **Public link** – copyable slug e.g. `/u/janedoe` (optional toggle).
+
+Uses read‑only `GET /api/profile`—no mutations here (editing lives in Settings ▸ General).
+
+---
+
+## 5 Settings dashboard (`/app/settings`)
+
+*Sidebar items generated via `settingsRoutes` array; highlights current.*
+
+| Route                | Key components                                                      | Notes                                                  |
+| -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------ |
+| `/settings/general`  | `AvatarUploader`, `DisplayNameField`, `ThemeToggle`, `LocaleSelect` | `ThemeToggle` writes cookie, triggers `class="dark"`   |
+| `/settings/billing`  | **BillingPanel** (see above)                                        |                                                        |
+| `/settings/usage`    | `CostChart`, `TokenChart`, `DownloadCSVButton`                      | cost/time graph (Recharts) via `/api/usage?window=30d` |
+| `/settings/security` | `ApiKeyTable`, `GenerateKeyButton`, `TwoFAToggle`                   | API keys hashed, copy once modal                       |
+
+### 5.1 Navigation guard
+
+`middleware.ts` denies `/settings/*` if unauth; returns 302 → `/login`.
+
+---
+
+## 6 API contracts (backend)
+
+| Method & Path                 | Body / Query                      | Returns                         | Auth       |
+| ----------------------------- | --------------------------------- | ------------------------------- | ---------- |
+| `GET /api/billing/summary`    | –                                 | `{plan, renew_date, usage_usd}` | JWT        |
+| `GET /api/billing/methods`    | –                                 | `[ {id, brand,last4,type} ]`    | JWT        |
+| `POST /api/billing/methods`   | `{stripeToken}` or `{walletAddr}` | `201 Created`                   | JWT + CSRF |
+| `POST /api/billing/subscribe` | `{plan_id}`                       | `302 Redirect to gateway`       | JWT + CSRF |
+| `GET /api/billing/invoices`   | `?page=1`                         | `[{id, pdf_url, total, date}]`  | JWT        |
+| `GET /api/profile`            | –                                 | `{name, avatar, scholarUrl,…}`  | JWT        |
+| `PATCH /api/profile`          | `{name, avatarId}`                | `200`                           | JWT + CSRF |
+| `GET /api/usage`              | `window`                          | `{daily:[{date,usd,tokens}]}`   | JWT        |
+
+---
+
+## 7 State management & caching
+
+* **React Query** for API data with stale = 60 s.
+* **Zustand** global atoms: `{user, plan}` only. Everything else page‑scoped.
+* Server‑side: Redis 1 h TTL for `/billing/summary` & `/usage`.
+* Aggressive SWR ensures Payment panel feels instantaneous.
+
+---
+
+## 8 Styling tokens (Tailwind)
+
+```ts
+// tailwind.config.ts
+theme: {
+  extend: {
+    colors: {
+      primary: { DEFAULT:'#6366f1', fg:'#ebeefc' },
+      success: '#10b981',
+      danger:  '#ef4444',
+    }
+  }
+}
+```
+
+*Light / dark variants handled by shadcn’s `dark:` utilities.*
+
+---
+
+## 9 Accessibility & i18n
+
+* Settings pages wrap in `<main id="settings-main" aria-labelledby="settings-h1">`.
+* Payment inputs have associated `<label>`.
+* Use `next-intl` for label strings; locale saved in user profile.
+
+---
+
+## 10 Deployment / build segregation
+
+* `apps/web/app/(dashboard)/layout.tsx` imports `@ui/sidebar`, `@ui/topbar`—chat bundle tree‑shakes Payment code when user stays in chat.
+* **Route handlers** (`/api/billing/**`) live in `apps/web/app/api/billing/**/route.ts`.
+* Webpack split‑chunk yields `billing.<hash>.js` separate from chat.
+
+---
+
+## 11 Analytics & monitoring
+
+* Frontend fires `posthog.capture('payment_success', {amount})`.
+* Backend logs Stripe/Coinbase webhook events to `BillingEvent` table.
+* Grafana dashboard alerts on `payment_failure_rate > 3%`.
+
+---
+
+### In a nutshell
+
+*Your chat UI stays untouched.*
+A dedicated **Settings → Billing** route hosts a modular, accessible Shadcn interface for card & crypto payments, plus usage visualisation. The **Profile** page showcases academic identity but does not expose billing. All pages share a sleek dashboard shell, lazy‑loaded and protected behind JWT + CSRF, so users experience a cohesive SaaS while developers enjoy a clean code split and first‑principle security.
+
+
+Below is a **clean‑room blueprint**—starting strictly from *first‑principles*—for three fully‑isolated areas of your product:
+
+1. **Billing / Payment Center** (credit‑card + crypto)
+2. **User Profile** (public avatar, academic footprint)
+3. **Settings Dashboard** (model limits, notification prefs, security)
+
+They live **outside** the chat workspace and do **not** pollute the chat UI bundle.
+Everything is mapped to *Next 14 App Router*, *Turborepo* conventions, Shadcn UI, Tailwind 4, Zustand, and React‑Query.
+
+---
+
+## 1 Information architecture (routes)
+
+```
+/app
+  ├─ chat/                     ← current workspace
+  ├─ profile/                  ← public profile preview
+  ├─ settings/                 ← personal settings
+  │    ├─ general              (name, theme, locale)
+  │    ├─ billing              **Payment UI lives here**
+  │    ├─ usage                (cost graphs)
+  │    └─ security             (keys, 2‑FA)
+  └─ admin/…                   (if role=admin)
+```
+
+*All pages use the same shell (`app/(dashboard)/layout.tsx`) which injects sidebar + top bar; chat lives in `(workspace)` segment. Payment & settings pages compile **only when navigated to** thanks to Next JS code‑splitting.*
+
+---
+
+## 2 Design primitives
+
+| Concern              | First‑principle decision                                                                           |
+| -------------------- | -------------------------------------------------------------------------------------------------- |
+| **Visual hierarchy** | Side‑rail navigation left (desktop), collapses to bottom navbar on mobile.                         |
+| **State scope**      | Page‑local React‑Query caches; global Zustand slice only for `user` & `plan`.                      |
+| **Security first**   | Every “write” API request must include `X-CSRF` header issued by `/api/csrf-token`.                |
+| **Accessibility**    | Shadcn components already WCAG 2.1 AA; add `aria-labelledby`, proper focus traps in dialogs.       |
+| **Responsiveness**   | 12‑column CSS grid (`grid-cols-[sidebar_1fr]`); fallback single column on `<768 px`.               |
+| **Pluggability**     | Payments abstracted via `walletProvider.ts` hook (returns `pay()`, `linkBank()`, `listMethods()`). |
+
+---
+
+## 3 Payment UI (Settings ▸ Billing)
+
+### 3.1 Component tree
+
+```
+BillingPanel.tsx
+├─ PaymentSummaryCard             (current plan, next invoice, usage bar)
+├─ PaymentMethodsSection
+│    ├─ StoredMethodCard[]        (Visa …, USDC wallet)
+│    └─ AddMethodButton + Dialog  (tabs: Card / Crypto)
+├─ InvoicesTable                  (past PDF invoices)
+└─ DangerZone                      (cancel, delete data)
+```
+
+### 3.2 Data flow
+
+```
+BillingPanel.mount()
+  ↳ ReactQuery GET /api/billing/summary
+  ↳ ReactQuery GET /api/billing/methods
+  ↳ ReactQuery GET /api/billing/invoices
+```
+
+*Mutation pattern* (`useMutation`):
+
+* **Add card** → POST Stripe SetupIntent token to `/api/billing/methods`
+* **Add crypto wallet** → POST Coinbase Commerce charge object, wait webhook
+* **Upgrade plan** → POST `/api/billing/subscribe` body `{plan_id}`
+* Update queries with `queryClient.invalidateQueries(['billing'])`
+
+### 3.3 Shadcn dialogs
+
+* `AddMethodDialog` = Radix Dialog + Card tabs; integrates **Stripe Elements** or **dynamic.xyz `ConnectButton`**.
+* Confirmation dialogues have red accent (`destructive` variant).
+
+### 3.4 Cost bar
+
+```tsx
+<Progress value={(usageUsd / planLimitUsd) * 100} className="h-2 bg-slate-700" />
+```
+
+Data from `/api/billing/usage?period=this_month`.
+
+---
+
+## 4 User Profile page (`/app/profile`)
+
+### 4.1 Sections
+
+1. **Header** – avatar (`next/image`), display‑name, degree badges.
+2. **Academic Footprint** – ORCID id, Google Scholar link, ResearchGate.
+3. **Writing Stats** – total words, citations, originality avg (spark‑line).
+4. **Public link** – copyable slug e.g. `/u/janedoe` (optional toggle).
+
+Uses read‑only `GET /api/profile`—no mutations here (editing lives in Settings ▸ General).
+
+---
+
+## 5 Settings dashboard (`/app/settings`)
+
+*Sidebar items generated via `settingsRoutes` array; highlights current.*
+
+| Route                | Key components                                                      | Notes                                                  |
+| -------------------- | ------------------------------------------------------------------- | ------------------------------------------------------ |
+| `/settings/general`  | `AvatarUploader`, `DisplayNameField`, `ThemeToggle`, `LocaleSelect` | `ThemeToggle` writes cookie, triggers `class="dark"`   |
+| `/settings/billing`  | **BillingPanel** (see above)                                        |                                                        |
+| `/settings/usage`    | `CostChart`, `TokenChart`, `DownloadCSVButton`                      | cost/time graph (Recharts) via `/api/usage?window=30d` |
+| `/settings/security` | `ApiKeyTable`, `GenerateKeyButton`, `TwoFAToggle`                   | API keys hashed, copy once modal                       |
+
+### 5.1 Navigation guard
+
+`middleware.ts` denies `/settings/*` if unauth; returns 302 → `/login`.
+
+---
+
+## 6 API contracts (backend)
+
+| Method & Path                 | Body / Query                      | Returns                         | Auth       |
+| ----------------------------- | --------------------------------- | ------------------------------- | ---------- |
+| `GET /api/billing/summary`    | –                                 | `{plan, renew_date, usage_usd}` | JWT        |
+| `GET /api/billing/methods`    | –                                 | `[ {id, brand,last4,type} ]`    | JWT        |
+| `POST /api/billing/methods`   | `{stripeToken}` or `{walletAddr}` | `201 Created`                   | JWT + CSRF |
+| `POST /api/billing/subscribe` | `{plan_id}`                       | `302 Redirect to gateway`       | JWT + CSRF |
+| `GET /api/billing/invoices`   | `?page=1`                         | `[{id, pdf_url, total, date}]`  | JWT        |
+| `GET /api/profile`            | –                                 | `{name, avatar, scholarUrl,…}`  | JWT        |
+| `PATCH /api/profile`          | `{name, avatarId}`                | `200`                           | JWT + CSRF |
+| `GET /api/usage`              | `window`                          | `{daily:[{date,usd,tokens}]}`   | JWT        |
+
+---
+
+## 7 State management & caching
+
+* **React Query** for API data with stale = 60 s.
+* **Zustand** global atoms: `{user, plan}` only. Everything else page‑scoped.
+* Server‑side: Redis 1 h TTL for `/billing/summary` & `/usage`.
+* Aggressive SWR ensures Payment panel feels instantaneous.
+
+---
+
+## 8 Styling tokens (Tailwind)
+
+```ts
+// tailwind.config.ts
+theme: {
+  extend: {
+    colors: {
+      primary: { DEFAULT:'#6366f1', fg:'#ebeefc' },
+      success: '#10b981',
+      danger:  '#ef4444',
+    }
+  }
+}
+```
+
+*Light / dark variants handled by shadcn’s `dark:` utilities.*
+
+---
+
+## 9 Accessibility & i18n
+
+* Settings pages wrap in `<main id="settings-main" aria-labelledby="settings-h1">`.
+* Payment inputs have associated `<label>`.
+* Use `next-intl` for label strings; locale saved in user profile.
+
+---
+
+## 10 Deployment / build segregation
+
+* `apps/web/app/(dashboard)/layout.tsx` imports `@ui/sidebar`, `@ui/topbar`—chat bundle tree‑shakes Payment code when user stays in chat.
+* **Route handlers** (`/api/billing/**`) live in `apps/web/app/api/billing/**/route.ts`.
+* Webpack split‑chunk yields `billing.<hash>.js` separate from chat.
+
+---
+
+
+
+
+
+Below is an **updated, model‑aware execution blueprint** that folds in the precise roster you just locked‑in:
+
+| Tier                | Alias we expose to Nodes | OpenRouter model slug            | Context | ¢ / 1 K in ↕ / out\*      | Primary role                         |
+| ------------------- | ------------------------ | -------------------------------- | ------- | ------------------------- | ------------------------------------ |
+| **Writer**          | `gemini-pro-25`          | `google/gemini-2.5-pro`          | **1 M** |  ≈ \$7 / \$21             | long‑form drafting, formatting       |
+| **Research**        | `o3-reasoner`            | `openai/o3`                      | 200 K   |  \$0.50 / \$1.50          | reasoning, tool use, citations       |
+|                     | `sonar-deep`             | `perplexity/sonar-deep-research` | 128 K   | \$0.20 / \$0.80 (+search) | exhaustive research queries          |
+|                     | `kimi-k2`                | `moonshotai/kimi-k2`             | 131 K   | \~\$0.30 / \$1.20         | fallback MoE, code / tool calls      |
+| **Evaluation / QA** | `claude4 -opus`            | `anthropic/claude-opus-4`        | 200 K   | \$15 / \$75               | rubric scoring, consensus judge      |
+| **Rare**            | `grok‑4`                 | `x-ai/grok-4`                    | 256 K   | \$3 / \$15                | niche reasoning, parallel tool calls |
+                       `claude 4-sonnet` for research as well. 
+\* rough list‑prices; update `price_table.json` when OpenRouter changes.
+
+---
+
+## 1 Model registry (`config/model_config.yaml`)
+
+```yaml
+defaults:
+  writer: gemini-pro-25
+  formatter: gemini-pro-25
+  search_primary: o3-reasoner
+  search_secondary: sonar-deep
+  search_fallback: kimi-k2
+  qa: o3-reasoner-mini       # alias of o3 with temp=0, max_tokens=256
+  evaluator: claude-opus
+override_allowlist:
+  - writer
+  - search_primary
+  - evaluator
+budget:
+  free: { daily_usd: 0.50, max_model: o3-reasoner }
+  pro:  { daily_usd: 5.00, max_model: sonar-deep }
+  enterprise: { daily_usd: 50, max_model: claude-opus }
+```
+
+Backend loads this once; any **admin override** writes a Redis key `model_override:<tenant>:<node>`.
+
+---
+
+## 2 System‑prompt library (`prompts/system_prompts.py`)
+
+Each node requests a *prompt template* by `name`.
+
+### 2.1 Writer – Dissertation
+
+```python
+DISsertation_SYSTEM = """
+You are *Gemini 2.5 Pro* serving as “HandyWriterz Dissertation Writer”.
+Rules:
+1. Always use Harvard author‑date citations: (Smith 2024).
+2. Section order: Abstract • Introduction • Literature Review … • References.
+3. `<SOURCE_n>` placeholders must map to entry `state.verified_sources[n]`.
+4. Max 4500 words. Table + Figure captions allowed.
+5. Do **NOT** make up sources.
+
+The user is {user}.  Current outline:
+{plan}
+
+Context passages:
+{rag_chunks}
+
+Research synthesis:
+{aggregated_findings}
+
+User prompt:
+{user_prompt}
+"""
+```
+
+### 2.2 Research (O3)
+
+```
+You are an investigative researcher. Produce 10 high‑quality sources with
+title • URL • 2‑line summary • credibility score. Use web search & your
+tool‑call ability. Never fabricate URLs.
+```
+
+### 2.3 Evaluator (Claude Opus)
+
+```
+Act as a senior PhD examiner. Score dissertation draft on 7 criteria
+(clarity, rigour, originality, citation accuracy, coherence, grammar,
+methodology) 0‑100 each. Return JSON {scores:{}, overall:…}. Use
+detailed explanations <= 300 tokens.
+```
+
+*All templates live in one module so you can version & AB‑test.*
+
+---
+
+## 3 Call‑stack with model logic
+
+```
+search_claude.py      → actually renamed ► search_o3.py  (model=o3-reasoner)
+search_sonar.py       → sonar-deep
+search_kimi_fallback  → kimi-k2
+
+writer.py             → gemini-pro-25
+formatter_advanced.py → gemini-pro-25  (for structured citation shaping)
+
+qa_swarm/*            → o3-reasoner-mini   (cheap pass)
+
+evaluator_advanced    → claude-opus  (+ optional grok-4 second opinion)
+```
+
+If `price_guard` detects > daily limit:
+
+1. writer switches to `kimi-k2`
+2. evaluator\_advanced downgrades to `o3-reasoner`
+3. NodeRunner emits `budget_degraded` WS event.
+
+---
+
+## 4 Admin model‑swap flow
+
+1. **UI** `/settings/billing` shows table with node → model name.
+2. Admin clicks writer row → Dropdown of allowed slugs (list from `/api/models/catalog`).
+3. PUT `/api/admin/models/writer` `{model_id:"kimi-k2"}`
+4. Redis key set → `model_service` pub/sub clears client cache.
+5. Confirmation toast “Writer now using Kimi K2”.
+
+---
+
+## 5 Complete request–response timeline (condensed)
+
+```text
+FE  POST /api/chat {prompt, mode:Dissertation, file_ids[]}
+BE  SystemRouter picks graph/dissertation.yaml
+    • Node search_o3   → openai/o3 (200 k ctx)
+    • Node sonar_deep  → perplexity/sonar-deep
+    • aggregator merges -> 54 sources
+    • writer (Gemini 2.5 Pro) builds draft
+    • formatter calls Gemini 2.5 again for citation fix
+    • qa_swarm / evaluator (Claude Opus) score
+    • If overall<80 or plagiarism>15 → writer.rewrite_o3 (o3)
+FE  WS stream shows progress cards
+    download DOCX link appears when formatter finished
+```
+
+---
+
+## 6 Pricing + context guardrails
+
+| Node             | Max input tokens      | Max output tokens | Fallback trigger             |
+| ---------------- | --------------------- | ----------------- | ---------------------------- |
+| writer (Gemini)  | 30 000 (rag + prompt) | 8 000             | if >30 k drop low‑sim chunks |
+| search\_o3       | 10 k                  | 4 k               | if rate‑limited → sonar‑deep |
+| sonar‑deep       | 120 k                 | 6 k               | search\_kimi\_k2             |
+| evaluator (Opus) | 25 k                  | 4 k               | downgrade to o3 if cost cap  |
+
+Budget enforcement lives in `services/budget_guard.py`.
+
+---
+
+## 7 Developer touch‑points
+
+* **models.json** – authoritative map: slug → price, context, provider.
+* **model\_service.get(node\_name, tenant)** – selects override, falls back.
+* **test\_models.py** – unit tests ensure every node default exists in catalog.
+* **price\_guard\_test.py** – simulates 20 prompts, asserts cost ≤ plan limit.
+
+---
+
+### In one paragraph
+
+**Gemini 2.5 Pro** now owns every long‑context, human‑quality writing or formatting task; **O3** + **Sonar Deep** drive evidence gathering; **Kimi K2** steps in when budgets or context overflow; **Claude Opus** judges; **Grok‑4** is an optional high‑context evaluator.  All model choices are declarative in `model_config.yaml`, overridable at runtime via a Redis key the admin UI sets.  System prompts are centralised per‑node so behaviour stays deterministic.  The backend enforces context and budget guardrails; the front‑end simply renders streaming events and never needs to know which LLM did the work.
+
+## 11 Analytics & monitoring
+
+* Frontend fires `posthog.capture('payment_success', {amount})`.
+* Backend logs Stripe/Coinbase webhook events to `BillingEvent` table.
+* Grafana dashboard alerts on `payment_failure_rate > 3%`.
+
+---
+
+### In a nutshell
+
+*Your chat UI stays untouched.*
+A dedicated **Settings → Billing** route hosts a modular, accessible Shadcn interface for card & crypto payments, plus usage visualisation. The **Profile** page showcases academic identity but does not expose billing. All pages share a sleek dashboard shell, lazy‑loaded and protected behind JWT + CSRF, so users experience a cohesive SaaS while developers enjoy a clean code split and first‑principle security.

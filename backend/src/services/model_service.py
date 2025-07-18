@@ -1,177 +1,120 @@
-"""
-Services for managing models and prompts in the multi-agent pipeline.
-"""
-
 import logging
-import os
-from typing import Dict, Any, Optional, List
-from dataclasses import dataclass
-from functools import lru_cache
-
 import yaml
-from pydantic import BaseModel, Field, ValidationError
-from jinja2 import Template, Environment, FileSystemLoader
+import json
+from functools import lru_cache
+from typing import Dict, Any, Optional
+
+# Placeholder for a proper Redis client
+class MockRedis:
+    def __init__(self) -> None:
+        self._data: Dict[str, Any] = {}
+
+    def get(self, key: str) -> Any:
+        return self._data.get(key)
+
+    def set(self, key: str, value: Any) -> None:
+        self._data[key] = value
+
+redis_client = MockRedis()
 
 logger = logging.getLogger(__name__)
 
-# --- Typed State Hand-off ---
-@dataclass
-class JobState:
-    prompt: str
-    context: list
-    meta: dict
-    outline: Optional[str] = None
-    search: Optional[list] = None
-    sources: Optional[list] = None
-    draft: Optional[str] = None
-    qa: Optional[dict] = None
+class BudgetExceeded(Exception):
+    """Custom exception for when a budget is exceeded."""
+    pass
 
-# --- Pydantic Models for Validation ---
-class IntentMeta(BaseModel):
-    type: str
-    word_target: int
-    citation_style: str
-    region: str
+class LLMClient:
+    """Represents a client for a large language model."""
+    def __init__(self, model_id: str, price_per_1k_input: float, price_per_1k_output: float):
+        self.model_id = model_id
+        self.price_per_1k_input = price_per_1k_input
+        self.price_per_1k_output = price_per_1k_output
 
-class PlanJson(BaseModel):
-    query: str
-    k: int
-    stage: str
+    def __repr__(self) -> str:
+        return f"LLMClient(model_id='{self.model_id}')"
 
-class EvidenceSource(BaseModel):
-    title: str
-    url: str
-    abstract: str
-    source_type: str
-    year: int
-    doi: Optional[str] = None
+class PriceGuard:
+    """Handles budget checks for model usage."""
+    def __init__(self, user_budget: float = 5.0):
+        self.user_budget = user_budget
+        self.current_spend = 0.0
 
-class QAResponse(BaseModel):
-    score: int
-    issues: List[Dict[str, Any]]
+    def charge(self, node: str, model_id: str, tokens: Dict[str, int], price_table: Dict[str, Any]) -> None:
+        """
+        Calculates the cost of a model call and raises an exception if the budget is exceeded.
+        """
+        model_prices = price_table.get(model_id)
+        if not model_prices:
+            raise ValueError(f"Price not found for model: {model_id}")
 
-# --- Model Service ---
+        input_tokens = tokens.get("input", 0)
+        output_tokens = tokens.get("output", 0)
+
+        cost = (input_tokens / 1000 * model_prices["input"]) + (output_tokens / 1000 * model_prices["output"])
+
+        if self.current_spend + cost > self.user_budget:
+            raise BudgetExceeded(f"Operation on node '{node}' with model '{model_id}' exceeds budget.")
+
+        self.current_spend += cost
+        logger.info(f"Charged ${cost:.4f} for {input_tokens} input and {output_tokens} output tokens. Total spend: ${self.current_spend:.4f}")
+
 class ModelService:
-    """Manages the mapping between pipeline stages and models."""
+    """Manages the mapping between pipeline stages, models, and tenants."""
 
-    def __init__(self, config_path: str = "src/config/model_config.yaml"):
+    def __init__(self, config_path: str = "src/config/model_config.yaml", price_table_path: str = "src/config/price_table.json"):
         self.config_path = config_path
-        self.model_map = self._load_model_map()
+        self.price_table_path = price_table_path
+        self.model_config = self._load_config(self.config_path)
+        self.price_table = self._load_config(self.price_table_path, is_json=True)
+        self.price_guard = PriceGuard()
 
-    def _load_model_map(self) -> Dict[str, Any]:
-        """Loads the model map from the YAML configuration file."""
+    def _load_config(self, path: str, is_json: bool = False) -> Dict[str, Any]:
+        """Loads a configuration file (YAML or JSON)."""
         try:
-            with open(self.config_path, "r") as f:
-                config_data = yaml.safe_load(f)
-            
-            logger.info(f"✅ Model map loaded successfully from {self.config_path}")
-            return config_data.get("stages", {})
+            with open(path, "r") as f:
+                if is_json:
+                    return json.load(f)
+                return yaml.safe_load(f)
         except FileNotFoundError:
-            logger.error(f"❌ Model configuration file not found at {self.config_path}")
+            logger.error(f"Configuration file not found at {path}")
             return {}
         except Exception as e:
-            logger.error(f"❌ Error loading model configuration: {e}")
+            logger.error(f"Error loading configuration from {path}: {e}")
             return {}
 
-    def get_model(self, stage_id: str) -> Optional[str]:
-        """Gets the appropriate model for a given stage."""
-        stage_config = self.model_map.get(stage_id)
-        if not stage_config:
-            logger.warning(f"⚠️ No model configuration found for stage: {stage_id}")
-            return None
-        return stage_config.get("model")
-
-    def reload_config(self) -> bool:
-        """Reloads the model configuration from the file."""
-        new_model_map = self._load_model_map()
-        if new_model_map != self.model_map:
-            self.model_map = new_model_map
-            return True
-        return False
-
-# --- Prompt Service ---
-class PromptService:
-    """Manages the loading, versioning, and templating of prompts."""
-
-    def __init__(self, db_connection):
-        self.db = db_connection
-        # Assuming a 'templates' directory for Jinja partials like 'common_header'
-        self.jinja_env = Environment(loader=FileSystemLoader('src/prompts/templates'))
-
-    @lru_cache(maxsize=32)
-    def get_prompt_template(self, stage: str) -> Optional[Template]:
+    @lru_cache(maxsize=128)
+    def get(self, node_name: str, tenant: str = "default") -> Optional[LLMClient]:
         """
-        Gets the Jinja template for a given stage from the database.
-        Uses LRU cache for performance.
+        Gets the appropriate LLMClient for a given node and tenant, checking for overrides.
         """
-        try:
-            # This would be an async call in a real application
-            # For simplicity, we'll use a synchronous placeholder
-            rec = self.db.fetchrow('SELECT template FROM system_prompts WHERE stage_id=$1 ORDER BY version DESC LIMIT 1', stage)
-            if rec:
-                return self.jinja_env.from_string(rec['template'])
-            return None
-        except Exception as e:
-            logger.error(f"❌ Error fetching prompt template for stage {stage}: {e}")
+        # 1. Check for Redis override
+        override_key = f"model_override:{tenant}:{node_name}"
+        override_model = redis_client.get(override_key)
+        if isinstance(override_model, bytes):
+            override_model = override_model.decode('utf-8')
+
+        if override_model and override_model in self.price_table:
+            logger.info(f"Using override model '{override_model}' for node '{node_name}' and tenant '{tenant}'")
+            model_id = override_model
+        else:
+            # 2. Fallback to YAML defaults
+            model_id = self.model_config.get("defaults", {}).get(node_name)
+
+        if not model_id:
+            logger.warning(f"No model configured for node: {node_name}")
             return None
 
-    def render_prompt(self, stage: str, context: Dict[str, Any]) -> str:
-        """Renders the prompt for a given stage with the provided context."""
-        template = self.get_prompt_template(stage)
-        if template:
-            return template.render(context)
-        return ""
+        # 3. Create LLMClient with pricing
+        model_prices = self.price_table.get(model_id)
+        if not model_prices:
+            logger.error(f"Price not found for model: {model_id}")
+            return None
 
-    def clear_prompt_cache(self, stage: str):
-        """Clears the cache for a specific prompt."""
-        self.get_prompt_template.cache_clear()
-        logger.info(f"✅ Cache cleared for prompt: {stage}")
+        return LLMClient(
+            model_id=model_id,
+            price_per_1k_input=model_prices["input"],
+            price_per_1k_output=model_prices["output"]
+        )
 
-# --- Output Validation ---
-class OutputValidator:
-    """Validates the output of LLM calls with retry logic."""
-
-    def __init__(self, llm, repair_prompt_template: str):
-        self.llm = llm
-        self.repair_prompt_template = repair_prompt_template
-
-    def validate_and_repair(self, prompt: str, schema: BaseModel, max_retries: int = 3) -> Optional[BaseModel]:
-        """
-        Validates the LLM output against a Pydantic schema and attempts to repair it on failure.
-        """
-        for i in range(max_retries):
-            out = self.llm.chat(prompt)
-            try:
-                return schema.parse_raw(out.content)
-            except ValidationError as e:
-                logger.warning(f"⚠️ Validation failed (attempt {i+1}/{max_retries}): {e}")
-                prompt = self.repair_prompt_template.format(bad=out.content)
-        
-        logger.error(f"❌ Failed to validate output after {max_retries} attempts.")
-        raise RuntimeError(f"LLM output validation failed after {max_retries} retries.")
-
-# --- Singleton Instances ---
-_model_service = None
-_prompt_service = None
-_output_validator = None
-
-def get_model_service():
-    """Gets the singleton instance of the ModelService."""
-    global _model_service
-    if _model_service is None:
-        _model_service = ModelService()
-    return _model_service
-
-def get_prompt_service(db_connection):
-    """Gets the singleton instance of the PromptService."""
-    global _prompt_service
-    if _prompt_service is None:
-        _prompt_service = PromptService(db_connection)
-    return _prompt_service
-
-def get_output_validator(llm, repair_prompt_template):
-    """Gets the singleton instance of the OutputValidator."""
-    global _output_validator
-    if _output_validator is None:
-        _output_validator = OutputValidator(llm, repair_prompt_template)
-    return _output_validator
+# Singleton instance
+model_service = ModelService()

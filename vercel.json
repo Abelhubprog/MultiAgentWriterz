@@ -1,0 +1,7 @@
+{
+  "env": {
+    "OPENROUTER_API_KEY": "@openrouter_api_key",
+    "STRIPE_PUB": "@stripe_pub",
+    "COINBASE_PUB": "@coinbase_pub"
+  }
+}

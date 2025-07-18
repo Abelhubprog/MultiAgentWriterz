@@ -1,6 +1,8 @@
 volumes:
   langgraph-data:
     driver: local
+  upload-data:
+    driver: local
 services:
   langgraph-redis:
     image: docker.io/redis:6
@@ -32,6 +34,8 @@ services:
     container_name: langgraph-api
     ports:
       - "8123:8000"
+    volumes:
+      - upload-data:/data/uploads
     depends_on:
       langgraph-redis:
         condition: service_healthy
@@ -42,3 +46,4 @@ services:
       LANGSMITH_API_KEY: ${LANGSMITH_API_KEY}
       REDIS_URI: redis://langgraph-redis:6379
       POSTGRES_URI: postgres://postgres:postgres@langgraph-postgres:5432/postgres?sslmode=disable
+      UPLOAD_DIR: /data/uploads

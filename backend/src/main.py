@@ -48,6 +48,7 @@ from db.database import (
 
 # Import admin routes
 from routes.admin_models import router as admin_models_router
+from api.files import router as files_router
 from db.models import User, Conversation, Document
 from services.error_handler import (
     error_handler, get_error_handler, ErrorContext, ErrorCategory, ErrorSeverity,
@@ -118,7 +119,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize systems with error handling
     startup_errors = []
-    
+
     # Test Redis connection
     try:
         await redis_client.ping()
@@ -126,7 +127,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         startup_errors.append(f"Redis connection failed: {e}")
         logger.error(f"❌ Redis connection failed: {e}")
-    
+
     # Test Database connection
     try:
         if db_manager.health_check():
@@ -137,7 +138,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         startup_errors.append(f"Database connection failed: {e}")
         logger.error(f"❌ Database connection failed: {e}")
-    
+
     # Test Error Handler
     try:
         await error_handler.get_error_statistics()
@@ -145,7 +146,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         startup_errors.append(f"Error handler initialization failed: {e}")
         logger.error(f"❌ Error handler initialization failed: {e}")
-    
+
     # Log startup summary
     if startup_errors:
         logger.warning(f"Backend started with {len(startup_errors)} issues:")
@@ -153,28 +154,28 @@ async def lifespan(app: FastAPI):
             logger.warning(f"  - {error}")
     else:
         logger.info("🚀 All systems operational - HandyWriterz backend ready!")
-    
+
     yield
-    
+
     logger.info("Shutting down HandyWriterz backend...")
-    
+
     # Graceful shutdown
     shutdown_tasks = []
-    
+
     # Close database connections
     try:
         db_manager.close()
         logger.info("✅ Database connections closed")
     except Exception as e:
         logger.error(f"❌ Error closing database: {e}")
-    
+
     # Close Redis connections
     try:
         await redis_client.close()
         logger.info("✅ Redis connections closed")
     except Exception as e:
         logger.error(f"❌ Error closing Redis: {e}")
-    
+
     logger.info("🔄 HandyWriterz backend shutdown complete")
 
 
@@ -215,11 +216,26 @@ app.add_middleware(
 )
 
 # Add global exception handlers
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(req: Request, exc: RequestValidationError):
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.errors(), "body": exc.body},
+    )
+
 app.add_exception_handler(HTTPException, global_exception_handler.handle_http_exception)
-app.add_exception_handler(RequestValidationError, global_exception_handler.handle_validation_exception)
 
 # Include admin routes
 app.include_router(admin_models_router)
+app.include_router(files_router, prefix="/api")
+from api.billing import router as billing_router
+from api.profile import router as profile_router
+from api.usage import router as usage_router
+
+app.include_router(billing_router, prefix="/api")
+app.include_router(profile_router, prefix="/api")
+app.include_router(usage_router, prefix="/api")
+
 
 # Include payment system routes
 from api.payments import router as payments_router
@@ -300,11 +316,11 @@ async def unified_system_status():
     try:
         # Get routing statistics
         routing_stats = unified_processor.router.get_routing_stats()
-        
+
         # Test system availability
         simple_status = "available" if SIMPLE_SYSTEM_AVAILABLE else "unavailable"
         advanced_status = "available"  # HandyWriterz is always available in this context
-        
+
         # Get Redis status
         redis_status = "unknown"
         try:
@@ -312,7 +328,7 @@ async def unified_system_status():
             redis_status = "healthy"
         except:
             redis_status = "unhealthy"
-        
+
         # Get database status
         db_status = "unknown"
         try:
@@ -322,13 +338,13 @@ async def unified_system_status():
                 db_status = "unhealthy"
         except:
             db_status = "unavailable"
-        
+
         return {
             "status": "operational",
             "version": "2.0.0-unified",
             "timestamp": time.time(),
             "platform": "Unified AI Platform",
-            
+
             # System availability
             "systems": {
                 "simple_gemini": {
@@ -340,13 +356,13 @@ async def unified_system_status():
                     "status": advanced_status,
                     "description": "Full academic writing workflow with 30+ agents",
                     "capabilities": [
-                        "academic_writing", "research_swarms", "qa_swarms", 
+                        "academic_writing", "research_swarms", "qa_swarms",
                         "writing_swarms", "citation_management", "turnitin_checking",
                         "learning_outcomes", "multi_agent_orchestration"
                     ]
                 }
             },
-            
+
             # Intelligent routing
             "routing": {
                 "enabled": True,
@@ -355,7 +371,7 @@ async def unified_system_status():
                 "modes": routing_stats["routing_modes"],
                 "capabilities": routing_stats["capabilities"]
             },
-            
+
             # Infrastructure
             "infrastructure": {
                 "redis": {
@@ -371,7 +387,7 @@ async def unified_system_status():
                     "purpose": "Semantic search and embeddings"
                 }
             },
-            
+
             # Features
             "features": {
                 "intelligent_routing": True,
@@ -385,18 +401,18 @@ async def unified_system_status():
                 "citation_management": True,
                 "plagiarism_checking": True
             },
-            
+
             # API endpoints
             "endpoints": {
                 "unified_chat": "/api/chat",
                 "simple_chat": "/api/chat/simple",
-                "advanced_chat": "/api/chat/advanced", 
+                "advanced_chat": "/api/chat/advanced",
                 "academic_writing": "/api/write",
                 "file_upload": "/api/upload",
                 "streaming": "/api/stream/{conversation_id}",
                 "documentation": "/docs"
             },
-            
+
             # Performance metrics
             "performance": {
                 "routing_overhead": "< 50ms",
@@ -405,7 +421,7 @@ async def unified_system_status():
                 "hybrid_response_time": "30-300 seconds (parallel processing)"
             }
         }
-        
+
     except Exception as e:
         logger.error(f"System status check failed: {e}")
         return {
@@ -443,7 +459,7 @@ async def analyze_request_complexity(
                     "size": len(content),
                     "type": file.content_type
                 })
-        
+
         # Parse user parameters
         parsed_user_params = {}
         if user_params:
@@ -451,12 +467,12 @@ async def analyze_request_complexity(
                 parsed_user_params = json.loads(user_params)
             except json.JSONDecodeError:
                 pass
-        
+
         # Analyze routing
         routing = await unified_processor.router.analyze_request(
             message, processed_files, parsed_user_params
         )
-        
+
         # Get detailed analysis
         return {
             "message": message,
@@ -466,7 +482,7 @@ async def analyze_request_complexity(
                 "has_user_params": bool(parsed_user_params),
                 "academic_indicators": [
                     keyword for keyword in [
-                        "essay", "research", "academic", "citation", "thesis", 
+                        "essay", "research", "academic", "citation", "thesis",
                         "dissertation", "literature review", "methodology"
                     ] if keyword.lower() in message.lower()
                 ]
@@ -479,11 +495,11 @@ async def analyze_request_complexity(
             },
             "estimated_processing_time": {
                 "simple": "1-3 seconds",
-                "advanced": "30-300 seconds", 
+                "advanced": "30-300 seconds",
                 "hybrid": "30-300 seconds (parallel)"
             }
         }
-        
+
     except Exception as e:
         logger.error(f"Request analysis failed: {e}")
         return {
@@ -509,7 +525,7 @@ async def detailed_health_check():
         "uptime_seconds": (time.time() - app.state.start_time) if hasattr(app.state, 'start_time') else 0,
         "services": {}
     }
-    
+
     # Check Redis
     try:
         await redis_client.ping()
@@ -517,7 +533,7 @@ async def detailed_health_check():
     except Exception as e:
         health_data["services"]["redis"] = {"status": "unhealthy", "error": str(e)}
         health_data["status"] = "degraded"
-    
+
     # Check Database
     try:
         if db_manager.health_check():
@@ -528,7 +544,7 @@ async def detailed_health_check():
     except Exception as e:
         health_data["services"]["database"] = {"status": "unhealthy", "error": str(e)}
         health_data["status"] = "degraded"
-    
+
     # Check Error Handler
     try:
         error_stats = await error_handler.get_error_statistics()
@@ -539,7 +555,7 @@ async def detailed_health_check():
         }
     except Exception as e:
         health_data["services"]["error_handler"] = {"status": "unhealthy", "error": str(e)}
-    
+
     return health_data
 
 
@@ -550,18 +566,18 @@ async def get_system_metrics():
     try:
         # Get error handler statistics
         error_stats = await error_handler.get_error_statistics()
-        
+
         # Get middleware statistics
         middleware_instance = None
         for middleware in app.user_middleware:
             if hasattr(middleware, 'cls') and middleware.cls.__name__ == 'RevolutionaryErrorMiddleware':
                 middleware_instance = middleware
                 break
-        
+
         middleware_stats = {}
         if middleware_instance and hasattr(middleware_instance, 'get_middleware_stats'):
             middleware_stats = await middleware_instance.get_middleware_stats()
-        
+
         return {
             "timestamp": time.time(),
             "system": {
@@ -601,13 +617,13 @@ async def login(
 ):
     """Authenticate user and return JWT token."""
     wallet_address = login_data.get("wallet_address")
-    
+
     if not wallet_address:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Wallet address is required"
         )
-    
+
     # Get or create user
     user = user_repo.get_user_by_wallet(wallet_address)
     if not user:
@@ -617,12 +633,12 @@ async def login(
             user_type="student",
             subscription_tier="free"
         )
-    
+
     # Generate JWT token
     token = await security_service.generate_jwt_token(user.to_dict())
-    
+
     logger.info(f"User authenticated: {wallet_address}")
-    
+
     return {
         "access_token": token,
         "token_type": "bearer",
@@ -646,97 +662,91 @@ async def verify_token(current_user: Dict[str, Any] = Depends(get_current_user))
     }
 
 
+from services.chunking_service import get_chunking_service
+from services.vector_storage import get_vector_storage
+from services.embedding_service import get_embedding_service
+
 # Unified Chat Endpoint with Intelligent Routing
-@app.post("/api/chat")
+from .api.schemas.chat import ChatRequest, ChatResponse
+
+@app.post("/api/chat", response_model=ChatResponse, status_code=202)
 @require_rate_limit("chat_request")
 @validate_input()
 @with_error_handling(ErrorCategory.AGENT_FAILURE, ErrorSeverity.MEDIUM)
 async def unified_chat_endpoint(
-    message: str = Form(...),
-    files: Optional[List[UploadFile]] = File(None),
-    user_params: Optional[str] = Form(None),  # JSON string of user parameters
-    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+    req: ChatRequest,
+    current_user: Optional[Dict[str, Any]] = Depends(get_current_user),
+    chunking_service = Depends(get_chunking_service),
+    embedding_service = Depends(get_embedding_service),
+    vector_storage = Depends(get_vector_storage)
 ):
     """
     🚀 Unified Chat Endpoint with Intelligent Routing
-    
+
     Automatically routes between:
-    - Simple Gemini system (quick responses) 
+    - Simple Gemini system (quick responses)
     - Advanced HandyWriterz system (academic writing)
     - Hybrid mode (both systems in parallel)
-    
+
     Routing is based on request complexity analysis.
     """
     try:
         # Process uploaded files
         processed_files = []
-        if files:
-            for file in files:
-                content = await file.read()
-                processed_files.append({
-                    "filename": file.filename,
-                    "content_type": file.content_type,
-                    "size": len(content),
-                    "content": content.decode('utf-8', errors='ignore') if file.content_type and file.content_type.startswith("text") else content
-                })
-        
-        # Parse user parameters if provided
-        parsed_user_params = {}
-        if user_params:
-            try:
-                parsed_user_params = json.loads(user_params)
-            except json.JSONDecodeError:
-                logger.warning(f"Invalid user_params JSON: {user_params}")
-        
+        if req.file_ids:
+            # In a real application, you would fetch the file details from the database
+            # using the file_ids. For now, we'll just log them.
+            logger.info(f"Processing files: {req.file_ids}")
+
         # Get user ID if available
         user_id = str(current_user.get("id")) if current_user else None
-        
+
         # Process using unified processor
         result = await unified_processor.process_message(
-            message=message,
+            message=req.prompt,
             files=processed_files,
-            user_params=parsed_user_params,
+            user_params=req.user_params,
             user_id=user_id
         )
-        
+
         # Enhanced response format compatible with both frontend expectations
         response = {
             "success": result.get("success", True),
             "response": result.get("response", ""),
             "sources": result.get("sources", []),
             "workflow_status": result.get("workflow_status", "completed"),
-            
+
             # Routing information
             "system_used": result.get("system_used", "unknown"),
             "complexity_score": result.get("complexity_score", 0.0),
             "routing_reason": result.get("routing_reason", ""),
             "routing_confidence": result.get("routing_confidence", 0.0),
             "processing_time": result.get("processing_time", 0.0),
-            
+
             # Advanced features (when available)
             "conversation_id": result.get("conversation_id"),
             "quality_score": result.get("quality_score"),
             "agent_metrics": result.get("agent_metrics", {}),
             "citation_count": result.get("citation_count", 0),
             "system_type": result.get("system_type", ""),
-            
+
             # Hybrid mode specific
             "simple_insights": result.get("simple_insights"),
             "research_depth": result.get("research_depth", 0),
             "hybrid_results": result.get("hybrid_results", {})
         }
-        
+
         # Log successful routing
         logger.info(f"✅ Chat processed successfully:")
         logger.info(f"   System: {result.get('system_used')}")
         logger.info(f"   Complexity: {result.get('complexity_score'):.1f}")
         logger.info(f"   Time: {result.get('processing_time'):.2f}s")
-        
+
         return response
-        
+
     except Exception as e:
         logger.error(f"Unified chat endpoint error: {e}")
-        
+
         # Enhanced error response
         error_response = {
             "success": False,
@@ -750,7 +760,7 @@ async def unified_chat_endpoint(
                 "error_message": str(e)
             }
         }
-        
+
         # Return error response instead of raising HTTP exception for better UX
         return error_response
 
@@ -773,7 +783,7 @@ async def simple_chat_endpoint(
             status_code=503,
             detail="Simple system not available. Use /api/chat for automatic routing."
         )
-    
+
     try:
         # Process files
         processed_files = []
@@ -784,10 +794,10 @@ async def simple_chat_endpoint(
                     "filename": file.filename,
                     "content": content.decode('utf-8', errors='ignore') if file.content_type and file.content_type.startswith("text") else content
                 })
-        
+
         # Force simple processing
         result = await unified_processor._process_simple(message, processed_files)
-        
+
         return {
             "success": True,
             "response": result.get("response", ""),
@@ -795,13 +805,13 @@ async def simple_chat_endpoint(
             "system_used": "simple_forced",
             "processing_time": 0.0  # Would need to time this
         }
-        
+
     except Exception as e:
         logger.error(f"Simple chat endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Advanced chat endpoint for academic writing (explicit routing)  
+# Advanced chat endpoint for academic writing (explicit routing)
 @app.post("/api/chat/advanced")
 @require_rate_limit("create_document")
 @validate_input()
@@ -826,7 +836,7 @@ async def advanced_chat_endpoint(
                     "filename": file.filename,
                     "content": content.decode('utf-8', errors='ignore') if file.content_type and file.content_type.startswith("text") else content
                 })
-        
+
         # Parse user parameters
         parsed_user_params = {}
         if user_params:
@@ -834,14 +844,14 @@ async def advanced_chat_endpoint(
                 parsed_user_params = json.loads(user_params)
             except json.JSONDecodeError:
                 logger.warning(f"Invalid user_params JSON: {user_params}")
-        
+
         user_id = str(current_user.get("id")) if current_user else None
-        
+
         # Force advanced processing
         result = await unified_processor._process_advanced(
             message, processed_files, parsed_user_params, user_id
         )
-        
+
         return {
             "success": True,
             "response": result.get("response", ""),
@@ -851,7 +861,7 @@ async def advanced_chat_endpoint(
             "system_used": "advanced_forced",
             "processing_time": 0.0  # Would need to time this
         }
-        
+
     except Exception as e:
         logger.error(f"Advanced chat endpoint error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -866,7 +876,7 @@ async def get_security_stats(
     try:
         # Get security events from Redis
         security_events = await redis_client.lrange("security_events", 0, 99)
-        
+
         # Get middleware stats
         middleware_stats = {}
         for middleware in app.user_middleware:
@@ -875,14 +885,14 @@ async def get_security_stats(
                 if instance and hasattr(instance, 'get_security_stats'):
                     middleware_stats = await instance.get_security_stats()
                     break
-        
+
         return {
             "security_events": [json.loads(event) for event in security_events],
             "middleware_stats": middleware_stats,
             "total_events": len(security_events),
             "timestamp": time.time()
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to get security stats: {e}")
         raise HTTPException(
@@ -913,7 +923,7 @@ async def start_writing(
             "file_count": len(request.uploaded_file_urls)
         }
     )
-    
+
     try:
         # Create or get user from wallet address
         user = None
@@ -927,13 +937,13 @@ async def start_writing(
                     user_type="student",
                     subscription_tier="free"
                 )
-        
+
         # Validate user parameters
         try:
             user_params = UserParams(**request.user_params)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid user parameters: {e}")
-        
+
         # Create conversation in database
         conversation = conversation_repo.create_conversation(
             user_id=str(user.id) if user else None,
@@ -941,9 +951,9 @@ async def start_writing(
             title=f"{user_params.writeupType.title()} - {user_params.field.title()}",
             workflow_status="initiated"
         )
-        
+
         conversation_id = str(conversation.id)
-        
+
         # Create initial state
         initial_state = HandyWriterzState(
             conversation_id=conversation_id,
@@ -981,16 +991,16 @@ async def start_writing(
             payment_transaction_id=request.payment_transaction_id,
             uploaded_files=[{"url": url} for url in request.uploaded_file_urls]
         )
-        
+
         # Start the workflow asynchronously
         asyncio.create_task(execute_writing_workflow(conversation_id, initial_state))
-        
+
         return WritingResponse(
             conversation_id=conversation_id,
             status="started",
             message="Revolutionary academic writing process initiated. Connect to the stream endpoint for real-time updates."
         )
-        
+
     except Exception as e:
         logger.error(f"Failed to start writing process: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1000,19 +1010,19 @@ async def start_writing(
 @app.get("/api/stream/{conversation_id}")
 async def stream_updates(conversation_id: str):
     """Stream real-time updates for a conversation."""
-    
+
     async def generate_events():
         """Generate SSE events from Redis pub/sub."""
         pubsub = redis_client.pubsub()
         channel = f"sse:{conversation_id}"
-        
+
         try:
             await pubsub.subscribe(channel)
             logger.info(f"Subscribed to SSE channel: {channel}")
-            
+
             # Send initial connection event
             yield f"data: {json.dumps({'type': 'connected', 'conversation_id': conversation_id})}\n\n"
-            
+
             # Listen for messages
             async for message in pubsub.listen():
                 if message["type"] == "message":
@@ -1020,23 +1030,23 @@ async def stream_updates(conversation_id: str):
                         # Parse the message data safely - SECURITY FIX
                         event_data = json.loads(message["data"])
                         yield f"data: {json.dumps(event_data)}\n\n"
-                        
+
                         # Break if workflow is complete or failed
                         if event_data.get("type") in ["workflow_complete", "workflow_failed"]:
                             break
-                            
+
                     except Exception as e:
                         logger.error(f"Error processing SSE message: {e}")
                         continue
-                        
+
         except Exception as e:
             logger.error(f"SSE stream error: {e}")
             yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-        
+
         finally:
             await pubsub.unsubscribe(channel)
             logger.info(f"Unsubscribed from SSE channel: {channel}")
-    
+
     return StreamingResponse(
         generate_events(),
         media_type="text/plain",
@@ -1049,121 +1059,18 @@ async def stream_updates(conversation_id: str):
 
 
 
-# File upload endpoint
-@app.post("/api/upload")
-@require_rate_limit("upload_file")
-@with_error_handling(ErrorCategory.VALIDATION, ErrorSeverity.MEDIUM)
-async def upload_file(
-    file: UploadFile = File(...),
-    current_user: Optional[Dict[str, Any]] = Depends(get_current_user)
+
+
+@app.post("/api/retrieve")
+async def retrieve(
+    query: str,
+    k: int = 10,
+    embedding_service = Depends(get_embedding_service),
+    vector_storage = Depends(get_vector_storage)
 ):
-    """Upload a file for processing with cloud storage."""
-    try:
-        # Validate file type and size
-        allowed_types = [".pdf", ".docx", ".txt", ".md"]
-        file_extension = os.path.splitext(file.filename)[1].lower()
-        max_size = 10 * 1024 * 1024  # 10MB limit
-        
-        if file_extension not in allowed_types:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported file type: {file_extension}. Allowed types: {allowed_types}"
-            )
-        
-        # Read file content
-        content = await file.read()
-        
-        if len(content) > max_size:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File too large. Maximum size: {max_size // (1024*1024)}MB"
-            )
-        
-        # Generate unique filename
-        file_id = str(uuid.uuid4())
-        safe_filename = f"{file_id}_{file.filename}"
-        
-        # Upload to cloud storage (R2/S3)
-        try:
-            import boto3
-            from botocore.config import Config
-            
-            # Configure R2 client (Cloudflare R2 is S3-compatible)
-            r2_client = boto3.client(
-                's3',
-                endpoint_url=os.getenv('R2_ENDPOINT_URL'),
-                aws_access_key_id=os.getenv('R2_ACCESS_KEY_ID'),
-                aws_secret_access_key=os.getenv('R2_SECRET_ACCESS_KEY'),
-                config=Config(signature_version='s3v4'),
-                region_name='auto'
-            )
-            
-            bucket_name = os.getenv('R2_BUCKET_NAME', 'handywriterz-uploads')
-            
-            # Upload file
-            r2_client.put_object(
-                Bucket=bucket_name,
-                Key=safe_filename,
-                Body=content,
-                ContentType=file.content_type or 'application/octet-stream',
-                Metadata={
-                    'original_filename': file.filename,
-                    'file_extension': file_extension,
-                    'upload_timestamp': str(time.time())
-                }
-            )
-            
-            # Generate public URL
-            file_url = f"https://{bucket_name}.r2.dev/{safe_filename}"
-            
-        except Exception as upload_error:
-            logger.warning(f"Cloud upload failed, using local fallback: {upload_error}")
-            # Fallback to local storage for development
-            upload_dir = os.getenv('UPLOAD_DIR', '/tmp/uploads')
-            os.makedirs(upload_dir, exist_ok=True)
-            
-            file_path = os.path.join(upload_dir, safe_filename)
-            with open(file_path, 'wb') as f:
-                f.write(content)
-            
-            file_url = f"/uploads/{safe_filename}"
-        
-        # Extract text content for processing
-        extracted_text = ""
-        try:
-            if file_extension == ".txt":
-                extracted_text = content.decode('utf-8')
-            elif file_extension == ".md":
-                extracted_text = content.decode('utf-8')
-            elif file_extension == ".pdf":
-                import PyPDF2
-                from io import BytesIO
-                pdf_reader = PyPDF2.PdfReader(BytesIO(content))
-                extracted_text = "\n".join(page.extract_text() for page in pdf_reader.pages)
-            elif file_extension == ".docx":
-                import mammoth
-                from io import BytesIO
-                result = mammoth.convert_to_html(BytesIO(content))
-                # For simplicity, we'll just use the text content.
-                # A more advanced implementation could handle the HTML.
-                text_result = mammoth.extract_raw_text(BytesIO(content))
-                extracted_text = text_result.value
-        except Exception as e:
-            logger.warning(f"Text extraction failed: {e}")
-        
-        return {
-            "file_id": file_id,
-            "filename": file.filename,
-            "size": len(content),
-            "type": file.content_type,
-            "url": file_url,
-            "extracted_text": extracted_text[:1000] if extracted_text else "",  # Preview
-            "status": "uploaded"
-        }
-        
-    except Exception as e:
-        logger.error(f"File upload failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    query_embedding = await embedding_service.embed_query(query)
+    results = await vector_storage.retrieve_chunks(query_embedding, k)
+    return {"results": results}
 
 
 # Get conversation status
@@ -1176,13 +1083,13 @@ async def get_conversation_status(
     try:
         # Query database for real conversation status
         conversation = conversation_repo.get_conversation(conversation_id)
-        
+
         if not conversation:
             raise HTTPException(
                 status_code=404,
                 detail=f"Conversation {conversation_id} not found"
             )
-        
+
         # Calculate progress based on workflow status
         progress_map = {
             "initiated": 5.0,
@@ -1195,13 +1102,13 @@ async def get_conversation_status(
             "completed": 100.0,
             "failed": 0.0
         }
-        
+
         current_progress = progress_map.get(conversation.workflow_status, 0.0)
-        
+
         # Estimate completion time based on status
         time_estimates = {
             "initiated": "8-12 minutes",
-            "planning": "6-10 minutes", 
+            "planning": "6-10 minutes",
             "searching": "4-8 minutes",
             "filtering": "3-5 minutes",
             "writing": "2-4 minutes",
@@ -1210,7 +1117,7 @@ async def get_conversation_status(
             "completed": "Complete",
             "failed": "Failed"
         }
-        
+
         return {
             "conversation_id": conversation_id,
             "status": conversation.workflow_status,
@@ -1223,7 +1130,7 @@ async def get_conversation_status(
             "error_message": conversation.error_message,
             "retry_count": conversation.retry_count or 0
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1234,7 +1141,7 @@ async def get_conversation_status(
 # Download document endpoint
 @app.get("/api/download/{conversation_id}/{document_type}")
 async def download_document(
-    conversation_id: str, 
+    conversation_id: str,
     document_type: str,
     document_repo=Depends(get_document_repository)
 ):
@@ -1244,27 +1151,27 @@ async def download_document(
         allowed_types = ["docx", "txt", "pdf", "lo_report"]
         if document_type not in allowed_types:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"Invalid document type: {document_type}. Allowed: {allowed_types}"
             )
-        
+
         # Get document from database
         document = document_repo.get_by_conversation_and_type(conversation_id, document_type)
-        
+
         if not document:
             raise HTTPException(
-                status_code=404, 
+                status_code=404,
                 detail=f"Document of type {document_type} not found for conversation {conversation_id}"
             )
-        
+
         # Check if document has a file URL (cloud storage)
         if document.file_urls and document_type in document.file_urls:
             file_url = document.file_urls[document_type]
-            
+
             # For cloud storage, redirect to the file URL
             from fastapi.responses import RedirectResponse
             return RedirectResponse(url=file_url, status_code=302)
-        
+
         # If no file URL, generate document content on-the-fly
         content = document.content
         if not content:
@@ -1272,29 +1179,29 @@ async def download_document(
                 status_code=404,
                 detail="Document content not available"
             )
-        
+
         # Generate appropriate response based on document type
         if document_type == "docx":
             from io import BytesIO
             from docx import Document as DocxDocument
-            
+
             # Create DOCX from content
             doc = DocxDocument()
             for paragraph in content.split('\n\n'):
                 if paragraph.strip():
                     doc.add_paragraph(paragraph.strip())
-            
+
             bio = BytesIO()
             doc.save(bio)
             bio.seek(0)
-            
+
             from fastapi.responses import StreamingResponse
             return StreamingResponse(
                 BytesIO(bio.getvalue()),
                 media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 headers={"Content-Disposition": f"attachment; filename={conversation_id}_{document_type}.docx"}
             )
-            
+
         elif document_type == "txt":
             from fastapi.responses import Response
             return Response(
@@ -1302,22 +1209,22 @@ async def download_document(
                 media_type="text/plain",
                 headers={"Content-Disposition": f"attachment; filename={conversation_id}_{document_type}.txt"}
             )
-            
+
         elif document_type == "lo_report":
             # Learning outcomes report as JSON
             lo_data = document.metadata.get("learning_outcomes", {}) if document.metadata else {}
             import json
-            
+
             from fastapi.responses import Response
             return Response(
                 content=json.dumps(lo_data, indent=2),
                 media_type="application/json",
                 headers={"Content-Disposition": f"attachment; filename={conversation_id}_learning_outcomes.json"}
             )
-        
+
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported document type: {document_type}")
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1334,13 +1241,13 @@ async def get_user_profile(
     """Get user profile by wallet address."""
     try:
         user = user_repo.get_user_by_wallet(wallet_address)
-        
+
         if not user:
             raise HTTPException(
                 status_code=404,
                 detail="User not found"
             )
-        
+
         return {
             "id": str(user.id),
             "wallet_address": user.wallet_address,
@@ -1354,7 +1261,7 @@ async def get_user_profile(
             "last_active": user.last_active.isoformat() if user.last_active else None,
             "preferences": user.preferences
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1371,21 +1278,21 @@ async def update_user_profile(
     """Update user profile."""
     try:
         user = user_repo.get_user_by_wallet(wallet_address)
-        
+
         if not user:
             raise HTTPException(
                 status_code=404,
                 detail="User not found"
             )
-        
+
         # Update allowed fields
         allowed_fields = ['user_type', 'subscription_tier', 'preferences']
         update_data = {k: v for k, v in user_data.items() if k in allowed_fields}
-        
+
         user_repo.update_user_stats(str(user.id), **update_data)
-        
+
         return {"status": "updated", "message": "User profile updated successfully"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1403,15 +1310,15 @@ async def get_user_conversations(
     """Get user's conversation history."""
     try:
         user = user_repo.get_user_by_wallet(wallet_address)
-        
+
         if not user:
             raise HTTPException(
                 status_code=404,
                 detail="User not found"
             )
-        
+
         conversations = conversation_repo.get_user_conversations(str(user.id), limit)
-        
+
         return {
             "conversations": [
                 {
@@ -1426,7 +1333,7 @@ async def get_user_conversations(
                 for conv in conversations
             ]
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1434,7 +1341,7 @@ async def get_user_conversations(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# Credits management endpoints  
+# Credits management endpoints
 @app.get("/api/credits/{wallet_address}")
 async def get_user_credits(
     wallet_address: str,
@@ -1443,7 +1350,7 @@ async def get_user_credits(
     """Get user's credit balance and usage statistics."""
     try:
         user = user_repo.get_user_by_wallet(wallet_address)
-        
+
         if not user:
             # Create user if they don't exist
             user = user_repo.create_user(
@@ -1452,7 +1359,7 @@ async def get_user_credits(
                 subscription_tier="free",
                 credits_balance=3  # Welcome bonus
             )
-        
+
         return {
             "wallet_address": wallet_address,
             "credits_balance": user.credits_balance,
@@ -1465,7 +1372,7 @@ async def get_user_credits(
                 "total_words_generated": user.total_words_generated or 0
             }
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to get user credits: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1482,40 +1389,40 @@ async def purchase_credits(
         amount = purchase_data.get("amount", 0)
         payment_method = purchase_data.get("payment_method", "crypto")
         transaction_id = purchase_data.get("transaction_id")
-        
+
         if amount <= 0:
             raise HTTPException(
                 status_code=400,
                 detail="Invalid credit amount"
             )
-        
+
         user = user_repo.get_user_by_wallet(wallet_address)
-        
+
         if not user:
             raise HTTPException(
                 status_code=404,
                 detail="User not found"
             )
-        
+
         # TODO: Verify payment transaction
         # For now, we'll trust the transaction
-        
+
         # Add credits to user balance
         new_balance = user.credits_balance + amount
         user_repo.update_user_stats(
             str(user.id),
             credits_balance=new_balance
         )
-        
+
         logger.info(f"Credits purchased: {wallet_address} - {amount} credits")
-        
+
         return {
             "status": "success",
             "credits_added": amount,
             "new_balance": new_balance,
             "transaction_id": transaction_id
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1531,7 +1438,7 @@ async def claim_welcome_bonus(
     """Claim welcome bonus credits."""
     try:
         user = user_repo.get_user_by_wallet(wallet_address)
-        
+
         if not user:
             # Create user with welcome bonus
             user = user_repo.create_user(
@@ -1541,21 +1448,21 @@ async def claim_welcome_bonus(
                 credits_balance=3,  # Welcome bonus
                 welcome_bonus_claimed=True
             )
-            
+
             return {
                 "status": "success",
                 "credits_granted": 3,
                 "new_balance": 3,
                 "message": "Welcome bonus claimed!"
             }
-        
+
         # Check if bonus already claimed
         if user.welcome_bonus_claimed:
             raise HTTPException(
                 status_code=400,
                 detail="Welcome bonus already claimed"
             )
-        
+
         # Grant welcome bonus
         new_balance = user.credits_balance + 3
         user_repo.update_user_stats(
@@ -1563,16 +1470,16 @@ async def claim_welcome_bonus(
             credits_balance=new_balance,
             welcome_bonus_claimed=True
         )
-        
+
         logger.info(f"Welcome bonus claimed: {wallet_address}")
-        
+
         return {
             "status": "success",
             "credits_granted": 3,
             "new_balance": new_balance,
             "message": "Welcome bonus claimed!"
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1587,17 +1494,17 @@ async def dynamic_webhook(payload: Dict[str, Any]):
     try:
         # Process Dynamic.xyz webhook
         event_type = payload.get("type")
-        
+
         if event_type == "payment.completed":
             # Handle successful payment
             logger.info(f"Payment completed: {payload}")
-            
+
         elif event_type == "user.authenticated":
             # Handle user authentication
             logger.info(f"User authenticated: {payload}")
-        
+
         return {"status": "received"}
-        
+
     except Exception as e:
         logger.error(f"Dynamic webhook processing failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1610,13 +1517,13 @@ async def turnitin_webhook(payload: Dict[str, Any]):
         # Process Turnitin webhook
         submission_id = payload.get("submission_id")
         status = payload.get("status")
-        
+
         if status == "completed":
             # Handle completed plagiarism check
             logger.info(f"Turnitin check completed for submission: {submission_id}")
-        
+
         return {"status": "received"}
-        
+
     except Exception as e:
         logger.error(f"Turnitin webhook processing failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1639,16 +1546,16 @@ async def semantic_search(
         query = request.get("query", "")
         if not query:
             raise HTTPException(status_code=400, detail="Query is required")
-        
+
         # Optional parameters
         academic_field = request.get("academic_field")
         min_credibility = request.get("min_credibility", 0.6)
         limit = min(request.get("limit", 10), 50)  # Max 50 results
         year_range = request.get("year_range")  # [start_year, end_year]
-        
+
         # Generate query embedding
         query_embedding = await embedding_service.embed_query(query, "academic_search")
-        
+
         # Perform semantic search
         results = await vector_storage.semantic_search_documents(
             query_embedding=query_embedding,
@@ -1657,7 +1564,7 @@ async def semantic_search(
             min_credibility=min_credibility,
             year_range=tuple(year_range) if year_range and len(year_range) == 2 else None
         )
-        
+
         return {
             "query": query,
             "results": results,
@@ -1669,7 +1576,7 @@ async def semantic_search(
                 "timestamp": time.time()
             }
         }
-        
+
     except Exception as e:
         logger.error(f"Semantic search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1683,13 +1590,13 @@ async def get_conversation_evidence(
     """Get all evidence for a conversation with vector similarity support."""
     try:
         evidence_list = await vector_storage.get_conversation_evidence(conversation_id)
-        
+
         return {
             "conversation_id": conversation_id,
             "evidence_count": len(evidence_list),
             "evidence": evidence_list
         }
-        
+
     except Exception as e:
         logger.error(f"Failed to get conversation evidence: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1703,15 +1610,15 @@ async def list_available_downloads(
     """List all available download formats for a conversation."""
     try:
         documents = document_repo.get_conversation_documents(conversation_id)
-        
+
         if not documents:
             raise HTTPException(
                 status_code=404,
                 detail=f"No documents found for conversation {conversation_id}"
             )
-        
+
         available_downloads = []
-        
+
         for doc in documents:
             download_info = {
                 "document_id": str(doc.id),
@@ -1721,7 +1628,7 @@ async def list_available_downloads(
                 "quality_score": doc.overall_quality_score,
                 "available_formats": []
             }
-            
+
             # Check available formats
             if doc.content_markdown:
                 download_info["available_formats"].append({
@@ -1729,35 +1636,35 @@ async def list_available_downloads(
                     "url": f"/api/download/{conversation_id}/txt",
                     "description": "Plain text format"
                 })
-            
+
             if doc.docx_url or doc.content_markdown:
                 download_info["available_formats"].append({
-                    "format": "docx", 
+                    "format": "docx",
                     "url": f"/api/download/{conversation_id}/docx",
                     "description": "Microsoft Word format"
                 })
-            
+
             if doc.pdf_url:
                 download_info["available_formats"].append({
                     "format": "pdf",
-                    "url": f"/api/download/{conversation_id}/pdf", 
+                    "url": f"/api/download/{conversation_id}/pdf",
                     "description": "PDF format"
                 })
-            
+
             if doc.learning_outcomes_coverage:
                 download_info["available_formats"].append({
                     "format": "lo_report",
                     "url": f"/api/download/{conversation_id}/lo_report",
                     "description": "Learning outcomes report (JSON)"
                 })
-            
+
             available_downloads.append(download_info)
-        
+
         return {
             "conversation_id": conversation_id,
             "documents": available_downloads
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1775,44 +1682,44 @@ async def download_all_formats(
         import zipfile
         from io import BytesIO
         from docx import Document as DocxDocument
-        
+
         documents = document_repo.get_conversation_documents(conversation_id)
-        
+
         if not documents:
             raise HTTPException(
                 status_code=404,
                 detail=f"No documents found for conversation {conversation_id}"
             )
-        
+
         # Create ZIP file in memory
         zip_buffer = BytesIO()
-        
+
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            
+
             for doc in documents:
                 base_name = f"{doc.title.replace(' ', '_')[:50]}"
-                
+
                 # Add TXT format
                 if doc.content_markdown:
                     zip_file.writestr(f"{base_name}.txt", doc.content_markdown)
-                
+
                 # Add DOCX format
                 if doc.content_markdown:
                     docx_doc = DocxDocument()
                     for paragraph in doc.content_markdown.split('\n\n'):
                         if paragraph.strip():
                             docx_doc.add_paragraph(paragraph.strip())
-                    
+
                     docx_buffer = BytesIO()
                     docx_doc.save(docx_buffer)
                     zip_file.writestr(f"{base_name}.docx", docx_buffer.getvalue())
-                
+
                 # Add learning outcomes report
                 if doc.learning_outcomes_coverage:
                     import json
                     lo_json = json.dumps(doc.learning_outcomes_coverage, indent=2)
                     zip_file.writestr(f"{base_name}_learning_outcomes.json", lo_json)
-                
+
                 # Add metadata
                 metadata = {
                     "title": doc.title,
@@ -1823,16 +1730,16 @@ async def download_all_formats(
                     "generated_at": doc.created_at.isoformat() if doc.created_at else None
                 }
                 zip_file.writestr(f"{base_name}_metadata.json", json.dumps(metadata, indent=2))
-        
+
         zip_buffer.seek(0)
-        
+
         from fastapi.responses import StreamingResponse
         return StreamingResponse(
             BytesIO(zip_buffer.getvalue()),
             media_type="application/zip",
             headers={"Content-Disposition": f"attachment; filename={conversation_id}_complete.zip"}
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -1852,10 +1759,10 @@ async def execute_writing_workflow(conversation_id: str, initial_state: HandyWri
             "user_params": initial_state.user_params
         }
     )
-    
+
     try:
         logger.info(f"🚀 Starting revolutionary workflow for conversation: {conversation_id}")
-        
+
         # Broadcast workflow start with enhanced data
         await redis_client.publish(
             f"sse:{conversation_id}",
@@ -1870,14 +1777,14 @@ async def execute_writing_workflow(conversation_id: str, initial_state: HandyWri
                 }
             })
         )
-        
+
         # TODO: Execute the LangGraph workflow with circuit breaker
         # Temporarily disabled until handywriterz_graph is implemented
         # config = {"configurable": {"thread_id": conversation_id}}
-        
+
         workflow_start_time = time.time()
         chunk_count = 0
-        
+
         # Simulate workflow progress for testing
         workflow_steps = [
             ("planning", "Creating document outline"),
@@ -1887,11 +1794,11 @@ async def execute_writing_workflow(conversation_id: str, initial_state: HandyWri
             ("evaluating", "Quality assessment"),
             ("formatting", "Final document formatting")
         ]
-        
+
         for i, (step, description) in enumerate(workflow_steps):
             await asyncio.sleep(2)  # Simulate processing time
             chunk_count += 1
-            
+
             # Enhanced progress broadcasting
             await redis_client.publish(
                 f"sse:{conversation_id}",
@@ -1907,10 +1814,10 @@ async def execute_writing_workflow(conversation_id: str, initial_state: HandyWri
                     }
                 })
             )
-            
+
             # Log major progress milestones
             logger.info(f"📍 Workflow [{conversation_id}] progressed to: {step}")
-        
+
         # TODO: Uncomment when handywriterz_graph is ready
         # async for chunk in handywriterz_graph.astream(initial_state, config):
         #     chunk_count += 1
@@ -1932,9 +1839,9 @@ async def execute_writing_workflow(conversation_id: str, initial_state: HandyWri
         #     # Log major progress milestones
         #     if "current_node" in chunk:
         #         logger.info(f"📍 Workflow [{conversation_id}] progressed to: {chunk['current_node']}")
-        
+
         workflow_duration = time.time() - workflow_start_time
-        
+
         # Broadcast successful completion
         await redis_client.publish(
             f"sse:{conversation_id}",
@@ -1950,23 +1857,23 @@ async def execute_writing_workflow(conversation_id: str, initial_state: HandyWri
                 }
             })
         )
-        
+
         logger.info(f"✅ Workflow completed successfully for {conversation_id} in {workflow_duration:.2f}s")
-        
+
     except Exception as e:
         workflow_duration = time.time() - workflow_start_time if 'workflow_start_time' in locals() else 0
-        
+
         # Handle error through error handler
         error_data = await error_handler.handle_error(
             e, context, ErrorCategory.AGENT_FAILURE, ErrorSeverity.HIGH
         )
-        
+
         logger.error(f"❌ Workflow execution failed for {conversation_id}: {e}")
-        
+
         # Determine if error is recoverable
         recovery_strategy = error_data.get("recovery_strategy", {})
         is_recoverable = recovery_strategy.get("retry_recommended", False)
-        
+
         # Broadcast workflow failure with recovery information
         await redis_client.publish(
             f"sse:{conversation_id}",
@@ -1985,7 +1892,7 @@ async def execute_writing_workflow(conversation_id: str, initial_state: HandyWri
                 }
             })
         )
-        
+
         # Re-raise if not recoverable
         if not is_recoverable:
             raise
@@ -1999,7 +1906,7 @@ async def get_app_config(request: Request):
     Get application configuration for frontend.
     Compatible with OpenWebUI frontend expectations.
     """
-    
+
     # For now, return a simplified config that satisfies the frontend
     # This can be expanded as needed
     return {
@@ -2041,7 +1948,7 @@ async def get_app_config(request: Request):
                 "content": "Help me write a 2000-word academic essay on sustainable healthcare practices with Harvard referencing."
             },
             {
-                "title": "Research Report", 
+                "title": "Research Report",
                 "content": "Create a comprehensive research report analyzing the impact of AI on modern education systems."
             },
             {
@@ -2095,14 +2002,14 @@ async def serve_frontend():
     """Serve the SvelteKit build index.html file."""
     build_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "build")
     index_html = os.path.join(build_dir, "index.html")
-    
+
     if os.path.exists(index_html):
         return FileResponse(index_html, media_type="text/html")
     else:
         # Fallback to development mode - serve from src
         frontend_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "src")
         app_html = os.path.join(frontend_dir, "app.html")
-        
+
         if os.path.exists(app_html):
             return FileResponse(app_html, media_type="text/html")
         else:
@@ -2130,11 +2037,11 @@ async def serve_spa(path: str):
     # Skip API routes
     if path.startswith("api/"):
         return JSONResponse(status_code=404, content={"error": "API endpoint not found"})
-    
+
     # Skip static files
     if path.startswith("static/") or path.startswith("_app/") or path.startswith("pyodide/"):
         return JSONResponse(status_code=404, content={"error": "Static file not found"})
-    
+
     # For all other routes, serve the SPA
     return await serve_frontend()
 

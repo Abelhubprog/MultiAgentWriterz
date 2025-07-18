@@ -1,13 +1,20 @@
 """
-Revolutionary Security Middleware for HandyWriterz.
-Production-ready security middleware with comprehensive protection layers.
+Advanced Security Middleware for HandyWriterz.
+Production-ready security middleware with comprehensive protection layers,
+threat detection, and advanced validation.
 """
 
 import json
 import logging
 import time
-from typing import Dict, Any, Callable
+import re
+import hashlib
+from typing import Dict, Any, Callable, List, Optional
+from datetime import datetime, timedelta
+from dataclasses import dataclass
+from enum import Enum
 
+import redis.asyncio as redis
 from fastapi import Request, Response, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp

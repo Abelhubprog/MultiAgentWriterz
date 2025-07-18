@@ -1,72 +1,20 @@
-# ==============================================================================
-# Model Configuration for Multi-Agent Pipeline
-# ==============================================================================
-#
-# This file maps each stage of the pipeline to a specific model.
-# The model names should correspond to the keys in the AI provider settings.
-#
-# Supported models:
-# - gemini_pro
-# - grok_4
-# - openai_o3
-# - gemini_web_tool
-# - grok_web_search
-#
+defaults:
+  writer: gemini-pro-25
+  formatter: gemini-pro-25
+  search_primary: o3-reasoner
+  search_secondary: sonar-deep
+  search_fallback: kimi-k2
+  qa: o3-reasoner-mini
+  evaluator: claude-opus
+  evaluator_advanced: claude-opus
 
-stages:
-  INTENT:
-    model: gemini_pro
-    description: "Deduces metadata from the user prompt for downstream planning."
+override_allowlist:
+  - writer
+  - search_primary
+  - evaluator
+  - evaluator_advanced
 
-  PLAN:
-    model: gemini_pro
-    description: "Drafts a section outline and search agenda."
-
-  SEARCH_A:
-    model: gemini_web_tool
-    description: "Web search using Gemini's tool."
-
-  SEARCH_B:
-    model: grok_web_search
-    description: "Web search using Grok's search capabilities."
-
-  SEARCH_C:
-    model: openai_o3
-    description: "Web search using OpenAI's o3 model with a browser tool."
-
-  EVIDENCE:
-    model: gemini_pro
-    description: "Screens and filters search results to identify credible sources."
-
-  WRITER:
-    model: auto
-    description: "Generates the main academic content. Model is chosen based on word count."
-    rules:
-      - model: gemini_pro
-        max_tokens: 2500
-      - model: grok_4
-        min_tokens: 2501
-
-  REWRITE:
-    model: openai_o3
-    description: "Paraphrases flagged content to improve quality and originality."
-    config:
-      temperature: 0.2
-
-  QA_1:
-    model: gemini_pro
-    description: "Quality assessment with a specific rubric weight."
-    config:
-      weight: 0.6
-
-  QA_2:
-    model: gemini_pro
-    description: "Quality assessment with a specific rubric weight."
-    config:
-      weight: 0.3
-
-  QA_3:
-    model: gemini_pro
-    description: "Quality assessment with a specific rubric weight."
-    config:
-      weight: 0.1
+budget:
+  free: { daily_usd: 0.50, max_model: o3-reasoner }
+  pro:  { daily_usd: 5.00, max_model: sonar-deep }
+  enterprise: { daily_usd: 50, max_model: claude-opus }
